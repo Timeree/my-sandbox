@@ -17,7 +17,7 @@ python3 server/server.py
 | 环境变量 | 默认 | 说明 |
 |---|---|---|
 | `PORT` | `3000` | HTTP 监听端口 |
-| `FTP_ROOT` | `server/ftproot` | FTP 根目录，启动时自动创建 |
+| `FTP_ROOT` | `/` | FTP 根目录，默认系统根路径 |
 | `FTP_USER` | `root` | FTP 用户名 |
 | `FTP_PASS` | `myboxpass` | FTP 密码 |
 
