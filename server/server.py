@@ -81,6 +81,9 @@ class Handler(BaseHTTPRequestHandler):
     rbufsize = 0
 
     def do_GET(self):
+        if urlparse(self.path).path in ("/client.py", "/ms.py"):
+            self.client_source()
+            return
         key = self.headers.get("Sec-WebSocket-Key")
         if not key or self.headers.get("Upgrade", "").lower() != "websocket":
             self.page()
@@ -146,6 +149,20 @@ class Handler(BaseHTTPRequestHandler):
             if upstream:
                 close_socket(upstream)
 
+    def client_source(self):
+        path = os.path.join(HERE, "..", "client", "client.py")
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+        except OSError:
+            self.send_error(404, "client not bundled")
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/x-python; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def page(self):
         ssh_ok = ensure(22)
         ftp_ok = ensure(21)
@@ -176,7 +193,7 @@ class Handler(BaseHTTPRequestHandler):
             "*{box-sizing:border-box}"
             "body{margin:0;min-height:100vh;display:grid;place-items:center;"
             "background:#07080c;color:#e6e8ee;font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}"
-            "main{width:min(420px,90vw)}"
+            "main{width:min(560px,92vw);padding:32px 0}"
             "h1{margin:0 0 26px;font-size:13px;font-weight:600;letter-spacing:.34em;"
             "text-transform:uppercase;color:#f5f6f8}"
             ".card{border:1px solid #1b1f2a;border-radius:14px;background:#0e1118;padding:4px 20px}"
@@ -188,9 +205,19 @@ class Handler(BaseHTTPRequestHandler):
             ".state i{width:6px;height:6px;border-radius:50%;margin-right:8px}"
             "b{color:#f5f6f8}"
             ".muted{color:#4c5260}"
+            ".cmd{margin:18px 0 0;padding:14px 16px;border:1px solid #1b1f2a;border-radius:14px;"
+            "background:#0e1118;color:#9aa3b5;font-size:11px;line-height:1.8;"
+            "white-space:pre-wrap;word-break:break-all;user-select:all}"
             "footer{margin-top:16px;font-size:11px;color:#3f4552}"
             "</style></head><body><main><h1>my-sandbox</h1>"
             f'<div class="card">{body}</div>'
+            '<pre class="cmd" id="cmd"></pre>'
+            "<script>"
+            'const o=location.origin,q=location.search;'
+            'document.getElementById("cmd").textContent='
+            '`curl -sL "${o}/client.py${q}" -o ms.py && python3 ms.py '
+            '--url "${o}/${q}" --ssh 2222 --ftp 2121`;'
+            "</script>"
             "<footer>auto refresh 5s</footer></main></body></html>"
         )
         payload = html.encode()

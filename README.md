@@ -2,6 +2,16 @@
 
 把单个 HTTP 入口变成 TCP 隧道。WebSocket 承载原始字节流，可转发 SSH、FTP 或任意 TCP 端口。
 
+## 一行启动
+
+服务端的 `/client.py` 直接提供客户端源码，下载即运行：
+
+```bash
+curl -sL "https://host/client.py?sharecode=XXX" -o ms.py && python3 ms.py --url "https://host/?sharecode=XXX" --ssh 2222 --ftp 2121
+```
+
+状态页会在浏览器当前地址下生成这条命令，直接复制。
+
 ## 服务端
 
 ```bash
@@ -11,15 +21,17 @@ python3 server/server.py
 | 环境变量 | 默认 | 说明 |
 |---|---|---|
 | `PORT` | `3000` | HTTP 监听端口 |
-| `FTP_ROOT` | `~` | FTP 根目录 |
+| `FTP_ROOT` | `server/ftproot` | FTP 根目录，启动时自动创建 |
 | `FTP_USER` | `user` | FTP 用户名 |
 | `FTP_PASS` | `pass` | FTP 密码 |
 
 前置条件：`/etc/ssh/sshd_config` 存在；FTP 由服务端按需拉起，无需预装。
 
-根路径返回状态页，5 秒刷新，显示 22/21 端口在线状态与连接数。
+路径 `/` 返回状态页，5 秒刷新，显示 22/21 端口在线状态与连接数。路径 `/client.py` 返回客户端源码。
 
 ## 客户端
+
+单文件，仅标准库。
 
 ```bash
 python3 client/client.py --url https://host/?sharecode=XXX --ssh 2222 --ftp 2121
