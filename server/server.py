@@ -9,7 +9,7 @@ from urllib.parse import parse_qs, urlparse
 import ws
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-FTP_ROOT = os.environ.get("FTP_ROOT") or os.path.join(HERE, "ftproot")
+FTP_ROOT = os.environ.get("FTP_ROOT") or "/"
 os.makedirs(FTP_ROOT, exist_ok=True)
 SERVICES = {
     21: lambda: subprocess.Popen(
