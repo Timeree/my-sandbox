@@ -4,8 +4,8 @@ import socketserver
 import sys
 
 ROOT = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.expanduser("~")
-USER = os.environ.get("FTP_USER", "user")
-PASS = os.environ.get("FTP_PASS", "pass")
+USER = os.environ.get("FTP_USER", "root")
+PASS = os.environ.get("FTP_PASS", "myboxpass")
 DATA_TIMEOUT = 30
 
 
