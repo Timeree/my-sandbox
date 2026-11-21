@@ -10,9 +10,11 @@ from urllib.parse import parse_qs, urlparse
 import ws
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+FTP_ROOT = os.environ.get("FTP_ROOT") or os.path.join(HERE, "ftproot")
+os.makedirs(FTP_ROOT, exist_ok=True)
 SERVICES = {
     21: lambda: subprocess.Popen(
-        ["python3", os.path.join(HERE, "ftpd.py"), os.environ.get("FTP_ROOT", os.path.expanduser("~"))],
+        ["python3", os.path.join(HERE, "ftpd.py"), FTP_ROOT],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
