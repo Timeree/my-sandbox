@@ -11,6 +11,27 @@ import ws
 HERE = os.path.dirname(os.path.abspath(__file__))
 FTP_ROOT = os.environ.get("FTP_ROOT") or "/"
 os.makedirs(FTP_ROOT, exist_ok=True)
+SSHD_CONFIG = "/tmp/mybox-sshd_config"
+SSHD_CONF = """Port 22
+PermitRootLogin yes
+PasswordAuthentication yes
+UsePAM no
+ClientAliveInterval 10
+ClientAliveCountMax 3
+"""
+
+
+def start_sshd():
+    with open(SSHD_CONFIG, "w") as f:
+        f.write(SSHD_CONF)
+    subprocess.run(
+        ["/usr/sbin/sshd", "-f", SSHD_CONFIG],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=5,
+    )
+
+
 SERVICES = {
     21: lambda: subprocess.Popen(
         ["python3", os.path.join(HERE, "ftpd.py"), FTP_ROOT],
@@ -18,12 +39,7 @@ SERVICES = {
         stderr=subprocess.DEVNULL,
         start_new_session=True,
     ),
-    22: lambda: subprocess.run(
-        ["/usr/sbin/sshd", "-f", "/etc/ssh/sshd_config"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        timeout=5,
-    ),
+    22: start_sshd,
 }
 start_lock = threading.Lock()
 
