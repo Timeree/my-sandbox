@@ -18,8 +18,8 @@ python3 server/server.py
 |---|---|---|
 | `PORT` | `3000` | HTTP 监听端口 |
 | `FTP_ROOT` | `server/ftproot` | FTP 根目录，启动时自动创建 |
-| `FTP_USER` | `user` | FTP 用户名 |
-| `FTP_PASS` | `pass` | FTP 密码 |
+| `FTP_USER` | `root` | FTP 用户名 |
+| `FTP_PASS` | `myboxpass` | FTP 密码 |
 
 前置条件：`/etc/ssh/sshd_config` 存在；FTP 由服务端按需拉起，无需预装。
 
@@ -44,7 +44,7 @@ python3 client/client.py --url https://host/?sharecode=XXX --ssh 2222 --ftp 2121
 
 ```bash
 # SSH
-ssh user@127.0.0.1 -p 2222
+ssh root@127.0.0.1 -p 2222
 
 # FTP
 ftp -p 127.0.0.1 2121
