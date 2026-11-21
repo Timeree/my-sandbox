@@ -21,7 +21,7 @@ python3 server/server.py
 | `FTP_USER` | `root` | FTP 用户名 |
 | `FTP_PASS` | `myboxpass` | FTP 密码 |
 
-前置条件：`/etc/ssh/sshd_config` 存在；FTP 由服务端按需拉起，无需预装。
+SSH 与 FTP 均由服务端按需拉起，无需预装。SSH 自带配置（root 登录、`ClientAliveInterval 10` 保活心跳），不依赖 `/etc/ssh/sshd_config`。
 
 根路径无状态页，返回 404。
 
