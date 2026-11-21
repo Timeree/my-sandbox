@@ -10,8 +10,6 @@
 curl -sL "https://host/client.py?sharecode=XXX" -o ms.py && python3 ms.py --url "https://host/?sharecode=XXX" --ssh 2222 --ftp 2121
 ```
 
-状态页会在浏览器当前地址下生成这条命令，直接复制。
-
 ## 服务端
 
 ```bash
@@ -27,7 +25,7 @@ python3 server/server.py
 
 前置条件：`/etc/ssh/sshd_config` 存在；FTP 由服务端按需拉起，无需预装。
 
-路径 `/` 返回状态页，5 秒刷新，显示 22/21 端口在线状态与连接数。路径 `/client.py` 返回客户端源码。
+路径 `/` 返回 404。路径 `/client.py` 返回客户端源码。
 
 ## 客户端
 

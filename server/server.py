@@ -3,7 +3,6 @@ import socket
 import subprocess
 import threading
 import time
-from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -27,8 +26,6 @@ SERVICES = {
     ),
 }
 start_lock = threading.Lock()
-state_lock = threading.Lock()
-state = {"active": 0, "total": 0}
 
 
 def close_socket(sock):
@@ -86,7 +83,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         key = self.headers.get("Sec-WebSocket-Key")
         if not key or self.headers.get("Upgrade", "").lower() != "websocket":
-            self.page()
+            self.send_error(404)
             return
         try:
             port = int(parse_qs(urlparse(self.path).query).get("p", ["22"])[0])
@@ -101,10 +98,6 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Connection", "Upgrade")
         self.send_header("Sec-WebSocket-Accept", ws.accept_key(key))
         self.end_headers()
-
-        with state_lock:
-            state["active"] += 1
-            state["total"] += 1
 
         upstream = None
         done = threading.Event()
@@ -144,8 +137,6 @@ class Handler(BaseHTTPRequestHandler):
             pass
         finally:
             done.set()
-            with state_lock:
-                state["active"] -= 1
             if upstream:
                 close_socket(upstream)
 
@@ -162,70 +153,6 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
-
-    def page(self):
-        ssh_ok = ensure(22)
-        ftp_ok = ensure(21)
-        with state_lock:
-            active = state["active"]
-            total = state["total"]
-
-        def row(name, ok):
-            color = "#34d399" if ok else "#f87171"
-            text = "online" if ok else "offline"
-            return (
-                f'<div class="row"><span>{name}</span>'
-                f'<span class="state"><i style="background:{color}"></i>{text}</span></div>'
-            )
-
-        body = (
-            row("ssh : 22", ssh_ok)
-            + row("ftp : 21", ftp_ok)
-            + f'<div class="row"><span>active</span><b>{active}</b></div>'
-            + f'<div class="row"><span>total</span><b>{total}</b></div>'
-            + f'<div class="row"><span>checked</span><span class="muted">{datetime.now():%Y-%m-%d %H:%M:%S}</span></div>'
-        )
-        html = (
-            '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
-            '<meta http-equiv="refresh" content="5">'
-            '<meta name="viewport" content="width=device-width,initial-scale=1">'
-            "<title>my-sandbox</title><style>"
-            "*{box-sizing:border-box}"
-            "body{margin:0;min-height:100vh;display:grid;place-items:center;"
-            "background:#07080c;color:#e6e8ee;font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}"
-            "main{width:min(560px,92vw);padding:32px 0}"
-            "h1{margin:0 0 26px;font-size:13px;font-weight:600;letter-spacing:.34em;"
-            "text-transform:uppercase;color:#f5f6f8}"
-            ".card{border:1px solid #1b1f2a;border-radius:14px;background:#0e1118;padding:4px 20px}"
-            ".row{display:flex;align-items:center;justify-content:space-between;"
-            "padding:13px 0;border-bottom:1px solid #1b1f2a}"
-            ".row:last-child{border-bottom:0}"
-            ".row>span:first-child{color:#787f90}"
-            ".state{display:flex;align-items:center}"
-            ".state i{width:6px;height:6px;border-radius:50%;margin-right:8px}"
-            "b{color:#f5f6f8}"
-            ".muted{color:#4c5260}"
-            ".cmd{margin:18px 0 0;padding:14px 16px;border:1px solid #1b1f2a;border-radius:14px;"
-            "background:#0e1118;color:#9aa3b5;font-size:11px;line-height:1.8;"
-            "white-space:pre-wrap;word-break:break-all;user-select:all}"
-            "footer{margin-top:16px;font-size:11px;color:#3f4552}"
-            "</style></head><body><main><h1>my-sandbox</h1>"
-            f'<div class="card">{body}</div>'
-            '<pre class="cmd" id="cmd"></pre>'
-            "<script>"
-            'const o=location.origin,q=location.search;'
-            'document.getElementById("cmd").textContent='
-            '`curl -sL "${o}/client.py${q}" -o ms.py && python3 ms.py '
-            '--url "${o}/${q}" --ssh 2222 --ftp 2121`;'
-            "</script>"
-            "<footer>auto refresh 5s</footer></main></body></html>"
-        )
-        payload = html.encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(payload)))
-        self.end_headers()
-        self.wfile.write(payload)
 
     def log_message(self, *args):
         pass
