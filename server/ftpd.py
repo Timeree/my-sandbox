@@ -2,6 +2,7 @@ import os
 import socket
 import socketserver
 import sys
+import time
 
 ROOT = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.expanduser("~")
 USER = os.environ.get("FTP_USER", "root")
@@ -13,6 +14,7 @@ class FTP(socketserver.StreamRequestHandler):
     pasv = None
     cwd = ROOT
     user = None
+    rename_from = None
 
     def reply(self, text):
         self.wfile.write((text + "\r\n").encode())
@@ -57,6 +59,66 @@ class FTP(socketserver.StreamRequestHandler):
 
     def cmd_noop(self, arg):
         self.reply("200 ok")
+
+    def cmd_opts(self, arg):
+        self.reply("200 ok")
+
+    def cmd_clnt(self, arg):
+        self.reply("200 ok")
+
+    def cmd_rest(self, arg):
+        self.reply("200 ok")
+
+    def cmd_allo(self, arg):
+        self.reply("200 ok")
+
+    def cmd_site(self, arg):
+        self.reply("200 ok")
+
+    def cmd_mdtm(self, arg):
+        parts = arg.split(" ", 1)
+        if len(parts) == 2 and len(parts[0]) == 14 and parts[0].isdigit():
+            ts, name = parts
+            target = self.resolve(name)
+            if not target or not os.path.isfile(target):
+                self.reply("550 not found")
+                return
+            try:
+                t = time.mktime(time.strptime(ts, "%Y%m%d%H%M%S"))
+                os.utime(target, (t, t))
+                self.reply("213 " + ts)
+            except (OSError, ValueError):
+                self.reply("550 failed")
+        else:
+            target = self.resolve(arg)
+            if target and os.path.isfile(target):
+                t = time.localtime(os.path.getmtime(target))
+                self.reply("213 " + time.strftime("%Y%m%d%H%M%S", t))
+            else:
+                self.reply("550 not found")
+
+    def cmd_rnfr(self, arg):
+        target = self.resolve(arg)
+        if target and os.path.exists(target):
+            self.rename_from = target
+            self.reply("350 ready for rnfr")
+        else:
+            self.reply("550 not found")
+
+    def cmd_rnto(self, arg):
+        if not self.rename_from:
+            self.reply("503 bad sequence")
+            return
+        target = self.resolve(arg, create=True)
+        if not target:
+            self.reply("550 permission denied")
+        else:
+            try:
+                os.rename(self.rename_from, target)
+                self.reply("250 renamed")
+            except OSError:
+                self.reply("550 rename failed")
+            self.rename_from = None
 
     def cmd_pwd(self, arg):
         self.reply(f'257 "{self.rel(self.cwd)}" is current directory')
