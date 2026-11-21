@@ -56,6 +56,7 @@ def recv_frame(sock):
 
 def connect(host, port, path, tls):
     sock = socket.create_connection((host, port), timeout=15)
+    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     if tls:
         import ssl
         sock = ssl.create_default_context().wrap_socket(sock, server_hostname=host)
