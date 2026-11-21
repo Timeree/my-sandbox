@@ -215,7 +215,8 @@ class FTP(socketserver.StreamRequestHandler):
         if not arg:
             return self.cwd
         target = os.path.abspath(os.path.join(self.cwd, arg))
-        if target != ROOT and not target.startswith(ROOT + os.sep):
+        prefix = ROOT.rstrip(os.sep) + os.sep
+        if target != ROOT and not target.startswith(prefix):
             return None
         if create and not os.path.isdir(os.path.dirname(target)):
             return None
