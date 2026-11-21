@@ -106,6 +106,7 @@ class Handler(BaseHTTPRequestHandler):
         self.tunnel(port, key)
 
     def tunnel(self, port, key):
+        self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self.send_response(101, "Switching Protocols")
         self.send_header("Upgrade", "websocket")
         self.send_header("Connection", "Upgrade")
@@ -119,6 +120,7 @@ class Handler(BaseHTTPRequestHandler):
             if not ensure(port):
                 return
             upstream = socket.create_connection(("127.0.0.1", port), timeout=10)
+            upstream.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             upstream.settimeout(None)
             self.connection.settimeout(None)
 
