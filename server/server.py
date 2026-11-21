@@ -78,9 +78,6 @@ class Handler(BaseHTTPRequestHandler):
     rbufsize = 0
 
     def do_GET(self):
-        if urlparse(self.path).path in ("/client.py", "/ms.py"):
-            self.client_source()
-            return
         key = self.headers.get("Sec-WebSocket-Key")
         if not key or self.headers.get("Upgrade", "").lower() != "websocket":
             self.send_error(404)
@@ -139,20 +136,6 @@ class Handler(BaseHTTPRequestHandler):
             done.set()
             if upstream:
                 close_socket(upstream)
-
-    def client_source(self):
-        path = os.path.join(HERE, "..", "client", "client.py")
-        try:
-            with open(path, "rb") as f:
-                data = f.read()
-        except OSError:
-            self.send_error(404, "client not bundled")
-            return
-        self.send_response(200)
-        self.send_header("Content-Type", "text/x-python; charset=utf-8")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
 
     def log_message(self, *args):
         pass

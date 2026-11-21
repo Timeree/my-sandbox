@@ -4,10 +4,8 @@
 
 ## 一行启动
 
-服务端的 `/client.py` 直接提供客户端源码，下载即运行：
-
 ```bash
-curl -sL "https://host/client.py?sharecode=XXX" -o ms.py && python3 ms.py --url "https://host/?sharecode=XXX" --ssh 2222 --ftp 2121
+python3 client/client.py --url "https://host/?sharecode=XXX" --ssh 2222 --ftp 2121
 ```
 
 ## 服务端
@@ -25,11 +23,11 @@ python3 server/server.py
 
 前置条件：`/etc/ssh/sshd_config` 存在；FTP 由服务端按需拉起，无需预装。
 
-路径 `/` 返回 404。路径 `/client.py` 返回客户端源码。
+根路径无状态页，返回 404。
 
 ## 客户端
 
-单文件，仅标准库。
+`client/client.py` + `client/ws.py` 两个文件，仅标准库，两个文件放同一目录。
 
 ```bash
 python3 client/client.py --url https://host/?sharecode=XXX --ssh 2222 --ftp 2121
