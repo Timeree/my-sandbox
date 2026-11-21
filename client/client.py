@@ -193,6 +193,7 @@ def serve(port, handler):
     listener.listen(16)
     while True:
         conn, _ = listener.accept()
+        conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         threading.Thread(target=handler, args=(conn,), daemon=True).start()
 
 
