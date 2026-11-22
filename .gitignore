@@ -1,3 +1,11 @@
 __pycache__/
 *.pyc
 server/ftproot/
+
+# 本地会话/数据库文件不上传
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+opencode.db*

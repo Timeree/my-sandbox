@@ -62,7 +62,7 @@ python3 client/client.py --url https://host/?sharecode=XXX --forward 3000:8080
 - 服务端对 22/21 做健康探测，缺失时拉起 sshd / ftpd.py，轮询等待就绪后建连。
 - 两端 `TCP_NODELAY`，关掉 Nagle 与延迟 ACK 叠加出的 40ms 固定停顿。
 - FTP 被动模式：客户端拦截 `227`/`229`，本地起临时监听并把端口回给 FTP 客户端，数据连接再映射到远端 PASV 端口。
-- FTP 预取：收到 `226`/`230` 后立刻代发一条 `PASV` 并把端口缓存，下一次 `PASV` 直接命中缓存，省掉一个 RTT。
+- FTP 预取：转发 `LIST/NLST/RETR/STOR` 时在同一帧里补一条 `PASV`，服务端处理完传输就绪下一个数据端口，下一轮 `PASV` 直接命中缓存，省掉一个 RTT。
 - 控制通道本地应答 `TYPE / OPTS / CLNT / ALLO / SITE / REST / NOOP`，这些命令不再往返。
 - 空闲 20 秒发 WebSocket ping 保活。
 
