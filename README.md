@@ -17,11 +17,11 @@ python3 server/server.py
 | 环境变量 | 默认 | 说明 |
 |---|---|---|
 | `PORT` | `3000` | HTTP 监听端口 |
-| `FTP_ROOT` | `server/ftproot` | FTP 根目录，启动时自动创建 |
+| `FTP_ROOT` | `/` | FTP 根目录，默认系统根路径 |
 | `FTP_USER` | `root` | FTP 用户名 |
 | `FTP_PASS` | `myboxpass` | FTP 密码 |
 
-前置条件：`/etc/ssh/sshd_config` 存在；FTP 由服务端按需拉起，无需预装。
+SSH 与 FTP 均由服务端按需拉起，无需预装。SSH 自带配置（root 登录、`ClientAliveInterval 10` 保活心跳），不依赖 `/etc/ssh/sshd_config`。
 
 根路径无状态页，返回 404。
 
@@ -55,14 +55,16 @@ python3 client/client.py --url https://host/?sharecode=XXX --forward 3000:8080
 
 ## 技术细节
 
-- 一条 WebSocket 承载一条 TCP 连接，二进制帧即原始字节，无额外封装。
-- 客户端每个本地连接向 `url?p=<port>` 发起 WebSocket；服务端按 `p` 连接 `127.0.0.1:<port>`。
+- 一条 WebSocket 复用所有 TCP 流：帧头 `sid(4) + kind(1)`，kind 为 `DATA / OPEN / FIN / RESET`。
+- 客户端首次转发才建 WebSocket，之后所有连接（含 FTP 数据连接）共用同一条，断线自动重连。
+- 半关闭而非硬断：一侧 `shutdown(SHUT_WR)` 转成 FIN 帧，两个方向都 FIN 才关闭 socket，避免发送缓冲区里的数据被丢弃。
+- 服务端 `OPEN` 异步建连，建连期间数据入队，不阻塞读循环。
 - 服务端对 22/21 做健康探测，缺失时拉起 sshd / ftpd.py，轮询等待就绪后建连。
-- FTP 被动模式：拦截控制通道的 `227`/`229` 响应，把数据端口替换为本地临时监听端口；每个数据连接单独开一条 WebSocket，30 秒无连接自动释放。
-- 控制通道按 CRLF 分行，非 `227`/`229` 原样透传，支持跨帧拼接。
-- `rbufsize = 0` 关闭 HTTP 请求读缓冲，避免握手阶段预读吞掉隧道字节。
-- 任一方向 EOF 时对 socket 执行 `shutdown`，唤醒对端阻塞读，避免半关闭死锁。
-- 心跳：收到 ping 帧回 pong。
+- 两端 `TCP_NODELAY`，关掉 Nagle 与延迟 ACK 叠加出的 40ms 固定停顿。
+- FTP 被动模式：客户端拦截 `227`/`229`，本地起临时监听并把端口回给 FTP 客户端，数据连接再映射到远端 PASV 端口。
+- FTP 预取：收到 `226`/`230` 后立刻代发一条 `PASV` 并把端口缓存，下一次 `PASV` 直接命中缓存，省掉一个 RTT。
+- 控制通道本地应答 `TYPE / OPTS / CLNT / ALLO / SITE / REST / NOOP`，这些命令不再往返。
+- 空闲 20 秒发 WebSocket ping 保活。
 
 ## 限制
 

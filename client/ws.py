@@ -11,6 +11,14 @@ def accept_key(key):
     return base64.b64encode(hashlib.sha1((key + GUID).encode()).digest()).decode()
 
 
+def xor_mask(payload, key):
+    size = len(payload)
+    if not size:
+        return payload
+    mask = (key * (size // 4 + 1))[:size]
+    return (int.from_bytes(payload, "big") ^ int.from_bytes(mask, "big")).to_bytes(size, "big")
+
+
 def send_frame(sock, opcode, payload, mask=True):
     size = len(payload)
     header = bytes([0x80 | opcode])
@@ -24,8 +32,7 @@ def send_frame(sock, opcode, payload, mask=True):
         sock.sendall(header + payload)
         return
     key = os.urandom(4)
-    body = bytes(byte ^ key[i % 4] for i, byte in enumerate(payload))
-    sock.sendall(header + key + body)
+    sock.sendall(header + key + xor_mask(payload, key))
 
 
 def recv_exact(sock, size):
@@ -48,7 +55,7 @@ def recv_frame(sock):
         size = struct.unpack("!Q", recv_exact(sock, 8))[0]
     if second & 0x80:
         key = recv_exact(sock, 4)
-        payload = bytes(byte ^ key[i % 4] for i, byte in enumerate(recv_exact(sock, size)))
+        payload = xor_mask(recv_exact(sock, size), key) if size else b""
     else:
         payload = recv_exact(sock, size) if size else b""
     return opcode, payload
@@ -56,6 +63,7 @@ def recv_frame(sock):
 
 def connect(host, port, path, tls):
     sock = socket.create_connection((host, port), timeout=15)
+    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     if tls:
         import ssl
         sock = ssl.create_default_context().wrap_socket(sock, server_hostname=host)
@@ -75,3 +83,20 @@ def connect(host, port, path, tls):
     if b"101" not in header.split(b"\r\n")[0]:
         raise RuntimeError(header.decode(errors="replace"))
     return sock
+
+
+def drain(sock):
+    try:
+        sock.settimeout(2)
+        sock.shutdown(socket.SHUT_WR)
+    except (OSError, ValueError):
+        pass
+    try:
+        while sock.recv(65536):
+            pass
+    except (OSError, ValueError):
+        pass
+    try:
+        sock.close()
+    except OSError:
+        pass

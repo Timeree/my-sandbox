@@ -2,17 +2,21 @@ import os
 import socket
 import socketserver
 import sys
+import time
 
 ROOT = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.expanduser("~")
 USER = os.environ.get("FTP_USER", "root")
 PASS = os.environ.get("FTP_PASS", "myboxpass")
 DATA_TIMEOUT = 30
+ACCEPT_TIMEOUT = 5
 
 
 class FTP(socketserver.StreamRequestHandler):
+    disable_nagle_algorithm = True
     pasv = None
     cwd = ROOT
     user = None
+    rename_from = None
 
     def reply(self, text):
         self.wfile.write((text + "\r\n").encode())
@@ -57,6 +61,66 @@ class FTP(socketserver.StreamRequestHandler):
 
     def cmd_noop(self, arg):
         self.reply("200 ok")
+
+    def cmd_opts(self, arg):
+        self.reply("200 ok")
+
+    def cmd_clnt(self, arg):
+        self.reply("200 ok")
+
+    def cmd_rest(self, arg):
+        self.reply("200 ok")
+
+    def cmd_allo(self, arg):
+        self.reply("200 ok")
+
+    def cmd_site(self, arg):
+        self.reply("200 ok")
+
+    def cmd_mdtm(self, arg):
+        parts = arg.split(" ", 1)
+        if len(parts) == 2 and len(parts[0]) == 14 and parts[0].isdigit():
+            ts, name = parts
+            target = self.resolve(name)
+            if not target or not os.path.isfile(target):
+                self.reply("550 not found")
+                return
+            try:
+                t = time.mktime(time.strptime(ts, "%Y%m%d%H%M%S"))
+                os.utime(target, (t, t))
+                self.reply("213 " + ts)
+            except (OSError, ValueError):
+                self.reply("550 failed")
+        else:
+            target = self.resolve(arg)
+            if target and os.path.isfile(target):
+                t = time.localtime(os.path.getmtime(target))
+                self.reply("213 " + time.strftime("%Y%m%d%H%M%S", t))
+            else:
+                self.reply("550 not found")
+
+    def cmd_rnfr(self, arg):
+        target = self.resolve(arg)
+        if target and os.path.exists(target):
+            self.rename_from = target
+            self.reply("350 ready for rnfr")
+        else:
+            self.reply("550 not found")
+
+    def cmd_rnto(self, arg):
+        if not self.rename_from:
+            self.reply("503 bad sequence")
+            return
+        target = self.resolve(arg, create=True)
+        if not target:
+            self.reply("550 permission denied")
+        else:
+            try:
+                os.rename(self.rename_from, target)
+                self.reply("250 renamed")
+            except OSError:
+                self.reply("550 rename failed")
+            self.rename_from = None
 
     def cmd_pwd(self, arg):
         self.reply(f'257 "{self.rel(self.cwd)}" is current directory')
@@ -105,6 +169,9 @@ class FTP(socketserver.StreamRequestHandler):
         if not target or not os.path.isfile(target):
             self.reply("550 not found")
             return
+        if self.pasv is None:
+            self.reply("425 use PASV or EPSV first")
+            return
         self.reply("150 opening data connection")
         conn = self.accept_data()
         if conn is None:
@@ -116,16 +183,18 @@ class FTP(socketserver.StreamRequestHandler):
                     if not chunk:
                         break
                     conn.sendall(chunk)
+            self.finish_data(conn)
         except OSError:
             pass
-        finally:
-            conn.close()
         self.reply("226 transfer complete")
 
     def cmd_stor(self, arg):
         target = self.resolve(arg, create=True)
         if not target:
             self.reply("550 permission denied")
+            return
+        if self.pasv is None:
+            self.reply("425 use PASV or EPSV first")
             return
         self.reply("150 opening data connection")
         conn = self.accept_data()
@@ -166,17 +235,22 @@ class FTP(socketserver.StreamRequestHandler):
         self.reply("221 bye")
 
     def transfer(self, data):
+        if self.pasv is None:
+            self.reply("425 use PASV or EPSV first")
+            return
         self.reply("150 opening data connection")
         conn = self.accept_data()
         if conn is None:
             return
         try:
             conn.sendall(data)
+            self.finish_data(conn)
         except OSError:
             pass
-        finally:
-            conn.close()
         self.reply("226 transfer complete")
+
+    def finish_data(self, conn):
+        conn.close()
 
     def open_pasv(self):
         self.close_pasv()
@@ -188,10 +262,7 @@ class FTP(socketserver.StreamRequestHandler):
         return sock
 
     def accept_data(self):
-        if self.pasv is None:
-            self.reply("425 use PASV or EPSV first")
-            return None
-        self.pasv.settimeout(DATA_TIMEOUT)
+        self.pasv.settimeout(ACCEPT_TIMEOUT)
         port = self.pasv.getsockname()[1]
         try:
             conn, peer = self.pasv.accept()
@@ -200,6 +271,7 @@ class FTP(socketserver.StreamRequestHandler):
             conn = None
         self.close_pasv()
         if conn is not None:
+            conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             conn.settimeout(DATA_TIMEOUT)
         return conn
 
@@ -215,7 +287,8 @@ class FTP(socketserver.StreamRequestHandler):
         if not arg:
             return self.cwd
         target = os.path.abspath(os.path.join(self.cwd, arg))
-        if target != ROOT and not target.startswith(ROOT + os.sep):
+        prefix = ROOT.rstrip(os.sep) + os.sep
+        if target != ROOT and not target.startswith(prefix):
             return None
         if create and not os.path.isdir(os.path.dirname(target)):
             return None
@@ -227,9 +300,12 @@ class FTP(socketserver.StreamRequestHandler):
 
     def listing(self, name):
         path = os.path.join(self.cwd, name)
-        if os.path.isdir(path):
-            return f"drwxr-xr-x 1 0 0 0 Jan 01 00:00 {name}\r\n"
-        return f"-rw-r--r-- 1 0 0 {os.path.getsize(path)} Jan 01 00:00 {name}\r\n"
+        try:
+            if os.path.isdir(path):
+                return f"drwxr-xr-x 1 0 0 0 Jan 01 00:00 {name}\r\n"
+            return f"-rw-r--r-- 1 0 0 {os.path.getsize(path)} Jan 01 00:00 {name}\r\n"
+        except OSError:
+            return f"-rw-r--r-- 1 0 0 0 Jan 01 00:00 {name}\r\n"
 
 
 if __name__ == "__main__":
