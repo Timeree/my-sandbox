@@ -263,10 +263,9 @@ class FTP(socketserver.StreamRequestHandler):
 
     def accept_data(self):
         self.pasv.settimeout(ACCEPT_TIMEOUT)
-        port = self.pasv.getsockname()[1]
         try:
-            conn, peer = self.pasv.accept()
-        except OSError as exc:
+            conn, _ = self.pasv.accept()
+        except OSError:
             self.reply("425 data connection failed")
             conn = None
         self.close_pasv()
