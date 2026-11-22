@@ -54,7 +54,6 @@ class FtpSink(Sink):
         b"CLNT": b"200 ok\r\n",
         b"ALLO": b"200 ok\r\n",
         b"SITE": b"200 ok\r\n",
-        b"REST": b"200 ok\r\n",
         b"NOOP": b"200 ok\r\n",
     }
     TRANSFER = {b"LIST", b"NLST", b"RETR", b"STOR", b"APPE", b"MLSD"}

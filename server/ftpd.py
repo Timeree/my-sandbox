@@ -17,6 +17,7 @@ class FTP(socketserver.StreamRequestHandler):
     cwd = ROOT
     user = None
     rename_from = None
+    rest = 0
 
     def reply(self, text):
         self.wfile.write((text + "\r\n").encode())
@@ -69,7 +70,12 @@ class FTP(socketserver.StreamRequestHandler):
         self.reply("200 ok")
 
     def cmd_rest(self, arg):
-        self.reply("200 ok")
+        try:
+            self.rest = int(arg)
+        except ValueError:
+            self.reply("501 bad offset")
+            return
+        self.reply("350 restarting at " + arg)
 
     def cmd_allo(self, arg):
         self.reply("200 ok")
@@ -172,12 +178,15 @@ class FTP(socketserver.StreamRequestHandler):
         if self.pasv is None:
             self.reply("425 use PASV or EPSV first")
             return
+        offset = self.take_rest()
         self.reply("150 opening data connection")
         conn = self.accept_data()
         if conn is None:
             return
         try:
             with open(target, "rb") as f:
+                if offset:
+                    f.seek(offset)
                 while True:
                     chunk = f.read(65536)
                     if not chunk:
@@ -196,23 +205,29 @@ class FTP(socketserver.StreamRequestHandler):
         if self.pasv is None:
             self.reply("425 use PASV or EPSV first")
             return
-        self.reply("150 opening data connection")
-        conn = self.accept_data()
-        if conn is None:
-            return
-        total = 0
+        offset = self.take_rest()
         try:
-            with open(target, "wb") as f:
+            f = open(target, "r+b" if offset else "wb")
+        except OSError:
+            self.reply("550 permission denied")
+            return
+        with f:
+            if offset:
+                f.seek(offset)
+            self.reply("150 opening data connection")
+            conn = self.accept_data()
+            if conn is None:
+                return
+            try:
                 while True:
                     chunk = conn.recv(65536)
                     if not chunk:
                         break
                     f.write(chunk)
-                    total += len(chunk)
-        except OSError:
-            pass
-        finally:
-            conn.close()
+            except OSError:
+                pass
+            finally:
+                conn.close()
         self.reply("226 transfer complete")
 
     def cmd_dele(self, arg):
@@ -281,6 +296,10 @@ class FTP(socketserver.StreamRequestHandler):
             except OSError:
                 pass
             self.pasv = None
+
+    def take_rest(self):
+        offset, self.rest = self.rest, 0
+        return offset
 
     def resolve(self, arg, create=False):
         if not arg:
