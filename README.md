@@ -24,7 +24,7 @@ python3 server/server.py --port 3000 --ftp-root / --ftp-user root
 
 每项都有命令行开关，默认值取同名环境变量，没有时用内置默认；发布平台注入的 `PORT` 因此仍然生效。密码写在命令行会暴露在 `ps` 里，建议继续用 `FTP_PASS` 环境变量。
 
-SSH 与 FTP 均由服务端按需拉起，无需预装。SSH 自带配置（root 登录、`ClientAliveInterval 10` 保活心跳），不依赖 `/etc/ssh/sshd_config`。
+SSH 与 FTP 均由服务端按需拉起，无需预装。SSH 自带配置（root 登录），不依赖 `/etc/ssh/sshd_config`。
 
 根路径无状态页，返回 404。
 

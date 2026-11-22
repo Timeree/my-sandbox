@@ -15,8 +15,6 @@ SSHD_CONF = """Port 22
 PermitRootLogin yes
 PasswordAuthentication yes
 UsePAM no
-ClientAliveInterval 10
-ClientAliveCountMax 3
 """
 
 DATA, OPEN, FIN, RESET = 0, 1, 2, 3
