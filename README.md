@@ -11,15 +11,18 @@ python3 client/client.py --url "https://host/?sharecode=XXX" --ssh 2222 --ftp 21
 ## 服务端
 
 ```bash
-python3 server/server.py
+python3 server/server.py --port 3000 --ftp-root / --ftp-user root
 ```
 
-| 环境变量 | 默认 | 说明 |
+| 参数 | 默认值 | 说明 |
 |---|---|---|
-| `PORT` | `3000` | HTTP 监听端口 |
-| `FTP_ROOT` | `/` | FTP 根目录，默认系统根路径 |
-| `FTP_USER` | `root` | FTP 用户名 |
-| `FTP_PASS` | `myboxpass` | FTP 密码 |
+| `--port` | `$PORT` 或 `3000` | HTTP 监听端口 |
+| `--ftp-port` | `$FTP_PORT` 或 `21` | FTP 监听端口 |
+| `--ftp-root` | `$FTP_ROOT` 或 `/` | FTP 根目录 |
+| `--ftp-user` | `$FTP_USER` 或 `root` | FTP 用户名 |
+| `--ftp-pass` | `$FTP_PASS` 或 `myboxpass` | FTP 密码 |
+
+每项都有命令行开关，默认值取同名环境变量，没有时用内置默认；发布平台注入的 `PORT` 因此仍然生效。密码写在命令行会暴露在 `ps` 里，建议继续用 `FTP_PASS` 环境变量。
 
 SSH 与 FTP 均由服务端按需拉起，无需预装。SSH 自带配置（root 登录、`ClientAliveInterval 10` 保活心跳），不依赖 `/etc/ssh/sshd_config`。
 

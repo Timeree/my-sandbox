@@ -1,3 +1,4 @@
+import argparse
 import os
 import socket
 import struct
@@ -9,8 +10,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import ws
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-FTP_ROOT = os.environ.get("FTP_ROOT") or "/"
-os.makedirs(FTP_ROOT, exist_ok=True)
 SSHD_CONFIG = "/tmp/mybox-sshd_config"
 SSHD_CONF = """Port 22
 PermitRootLogin yes
@@ -35,15 +34,22 @@ def start_sshd():
     )
 
 
-SERVICES = {
-    21: lambda: subprocess.Popen(
-        ["python3", os.path.join(HERE, "ftpd.py"), FTP_ROOT],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    ),
-    22: start_sshd,
-}
+def make_services(args):
+    env = dict(os.environ, FTP_PASS=args.ftp_pass)
+    return {
+        args.ftp_port: lambda: subprocess.Popen(
+            ["python3", os.path.join(HERE, "ftpd.py"),
+             "--root", args.ftp_root, "--user", args.ftp_user,
+             "--port", str(args.ftp_port)],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        ),
+        22: start_sshd,
+    }
+
+
 start_lock = threading.Lock()
 
 
@@ -67,8 +73,8 @@ def probe(port, timeout=1):
         return False
 
 
-def ensure(port):
-    starter = SERVICES.get(port)
+def ensure(port, services):
+    starter = services.get(port)
     if starter is None:
         return True
     if probe(port):
@@ -93,8 +99,9 @@ def ensure(port):
 
 
 class Mux:
-    def __init__(self, conn):
+    def __init__(self, conn, services):
         self.conn = conn
+        self.services = services
         self.wlock = threading.Lock()
         self.lock = threading.Lock()
         self.streams = {}
@@ -118,7 +125,7 @@ class Mux:
     def _connect(self, sid, entry, port):
         sock = None
         try:
-            if ensure(port):
+            if ensure(port, self.services):
                 sock = socket.create_connection(("127.0.0.1", port), timeout=10)
                 sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 sock.settimeout(None)
@@ -276,11 +283,21 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Connection", "Upgrade")
         self.send_header("Sec-WebSocket-Accept", ws.accept_key(key))
         self.end_headers()
-        Mux(self.connection).run()
+        Mux(self.connection, self.server.services).run()
 
     def log_message(self, *args):
         pass
 
 
 if __name__ == "__main__":
-    ThreadingHTTPServer(("0.0.0.0", int(os.environ.get("PORT", 3000))), Handler).serve_forever()
+    parser = argparse.ArgumentParser(description="my-sandbox server")
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", 3000)))
+    parser.add_argument("--ftp-port", type=int, default=int(os.environ.get("FTP_PORT", 21)))
+    parser.add_argument("--ftp-root", default=os.environ.get("FTP_ROOT") or "/")
+    parser.add_argument("--ftp-user", default=os.environ.get("FTP_USER", "root"))
+    parser.add_argument("--ftp-pass", default=os.environ.get("FTP_PASS", "myboxpass"))
+    args = parser.parse_args()
+    os.makedirs(args.ftp_root, exist_ok=True)
+    server = ThreadingHTTPServer(("0.0.0.0", args.port), Handler)
+    server.services = make_services(args)
+    server.serve_forever()

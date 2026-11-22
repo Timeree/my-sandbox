@@ -1,12 +1,12 @@
+import argparse
 import os
 import socket
 import socketserver
-import sys
 import time
 
-ROOT = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.expanduser("~")
-USER = os.environ.get("FTP_USER", "root")
-PASS = os.environ.get("FTP_PASS", "myboxpass")
+ROOT = os.path.expanduser("~")
+USER = "root"
+PASS = "myboxpass"
 DATA_TIMEOUT = 30
 ACCEPT_TIMEOUT = 5
 
@@ -327,7 +327,16 @@ class FTP(socketserver.StreamRequestHandler):
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("FTP_PORT", 21))
+    parser = argparse.ArgumentParser(description="my-sandbox ftpd")
+    parser.add_argument("--root", default=os.environ.get("FTP_ROOT") or os.path.expanduser("~"))
+    parser.add_argument("--user", default=os.environ.get("FTP_USER", "root"))
+    parser.add_argument("--pass", dest="password", default=os.environ.get("FTP_PASS", "myboxpass"))
+    parser.add_argument("--port", type=int, default=int(os.environ.get("FTP_PORT", 21)))
+    args = parser.parse_args()
+    ROOT = os.path.abspath(args.root)
+    USER = args.user
+    PASS = args.password
+    FTP.cwd = ROOT
     socketserver.ThreadingTCPServer.allow_reuse_address = True
-    with socketserver.ThreadingTCPServer(("0.0.0.0", port), FTP) as server:
+    with socketserver.ThreadingTCPServer(("0.0.0.0", args.port), FTP) as server:
         server.serve_forever()
