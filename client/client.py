@@ -11,7 +11,7 @@ import ws
 PASV = re.compile(rb"(\d+),(\d+),(\d+),(\d+),(\d+),(\d+)")
 EPSV = re.compile(rb"\(\|\|\|(\d+)\|\)")
 DATA_TIMEOUT = 30
-PING_INTERVAL = 20
+PING_INTERVAL = 15
 DATA, OPEN, FIN, RESET = 0, 1, 2, 3
 HDR = struct.Struct("!IB")
 

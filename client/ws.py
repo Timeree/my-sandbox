@@ -61,9 +61,24 @@ def recv_frame(sock):
     return opcode, payload
 
 
+def keepalive(sock):
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        idle = getattr(socket, "TCP_KEEPIDLE", getattr(socket, "TCP_KEEPALIVE", None))
+        if idle is not None:
+            sock.setsockopt(socket.IPPROTO_TCP, idle, 15)
+        for name, value in (("TCP_KEEPINTVL", 15), ("TCP_KEEPCNT", 3)):
+            opt = getattr(socket, name, None)
+            if opt is not None:
+                sock.setsockopt(socket.IPPROTO_TCP, opt, value)
+    except OSError:
+        pass
+
+
 def connect(host, port, path, tls):
     sock = socket.create_connection((host, port), timeout=15)
     sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    keepalive(sock)
     if tls:
         import ssl
         sock = ssl.create_default_context().wrap_socket(sock, server_hostname=host)

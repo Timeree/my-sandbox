@@ -19,6 +19,7 @@ UsePAM no
 
 DATA, OPEN, FIN, RESET = 0, 1, 2, 3
 HDR = struct.Struct("!IB")
+PING_INTERVAL = 15
 
 
 def start_sshd():
@@ -103,6 +104,19 @@ class Mux:
         self.wlock = threading.Lock()
         self.lock = threading.Lock()
         self.streams = {}
+        self.stopped = False
+        threading.Thread(target=self._keepalive, daemon=True).start()
+
+    def _keepalive(self):
+        while not self.stopped:
+            time.sleep(PING_INTERVAL)
+            if self.stopped:
+                break
+            try:
+                with self.wlock:
+                    ws.send_frame(self.conn, 0x9, b"", mask=False)
+            except (OSError, EOFError):
+                break
 
     def send(self, sid, kind, data=b""):
         try:
@@ -254,6 +268,7 @@ class Mux:
         except (OSError, EOFError, ValueError):
             pass
         finally:
+            self.stopped = True
             with self.lock:
                 entries = list(self.streams.values())
                 self.streams.clear()
@@ -276,6 +291,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
         self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        ws.keepalive(self.connection)
         self.send_response(101, "Switching Protocols")
         self.send_header("Upgrade", "websocket")
         self.send_header("Connection", "Upgrade")
