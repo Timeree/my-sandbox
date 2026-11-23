@@ -238,6 +238,19 @@ class FTP(socketserver.StreamRequestHandler):
         else:
             self.reply("550 not found")
 
+    def cmd_rmd(self, arg):
+        target = self.resolve(arg)
+        if not target or not os.path.isdir(target):
+            self.reply("550 not found")
+            return
+        try:
+            os.rmdir(target)
+            self.reply("250 directory removed")
+        except OSError:
+            self.reply("550 directory not empty")
+
+    cmd_rmdir = cmd_rmd
+
     def cmd_mkd(self, arg):
         target = self.resolve(arg, create=True)
         if target:
