@@ -7,7 +7,7 @@ import tempfile
 
 from . import __version__, boxes, ftpd, serve, tunnel
 
-REPO = "git+https://github.com/Timeree/my-sandbox.git@main"
+REPO = "https://codeload.github.com/Timeree/my-sandbox/tar.gz/refs/heads/main"
 
 
 def parse_forwards(items):
@@ -102,7 +102,8 @@ def cmd_add(args):
 
 
 def cmd_update(args):
-    rc = subprocess.call([sys.executable, "-m", "pip", "install", "--upgrade", REPO])
+    rc = subprocess.call([sys.executable, "-m", "pip", "install", "--upgrade",
+                          "--force-reinstall", "--no-deps", REPO])
     if rc:
         print("update failed, check the network and retry", file=sys.stderr)
     return rc

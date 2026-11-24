@@ -7,8 +7,10 @@
 ## 安装
 
 ```bash
-pip install git+https://github.com/Timeree/my-sandbox.git
+pip install https://codeload.github.com/Timeree/my-sandbox/tar.gz/refs/heads/main
 ```
+
+走的是 tarball 直链，`git clone` 经常被网络掐断，这条路更稳。
 
 升级到最新提交：
 
