@@ -1,30 +1,40 @@
-import argparse
 import os
 import socket
 import socketserver
+import threading
 import time
 
-ROOT = os.path.expanduser("~")
-USER = "root"
-PASS = "myboxpass"
 DATA_TIMEOUT = 30
 ACCEPT_TIMEOUT = 5
 
 
-class FTP(socketserver.StreamRequestHandler):
+class FtpServer(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+    def __init__(self, port, root, user, password):
+        self.root = os.path.abspath(root)
+        self.user = user
+        self.password = password
+        super().__init__(("0.0.0.0", port), FtpHandler)
+
+
+class FtpHandler(socketserver.StreamRequestHandler):
     disable_nagle_algorithm = True
-    pasv = None
-    cwd = ROOT
-    user = None
-    rename_from = None
-    rest = 0
+
+    def setup(self):
+        super().setup()
+        self.pasv = None
+        self.cwd = self.server.root
+        self.rename_from = None
+        self.rest = 0
 
     def reply(self, text):
         self.wfile.write((text + "\r\n").encode())
         self.wfile.flush()
 
     def handle(self):
-        self.reply("220 my-sandbox ftpd ready")
+        self.reply("220 mybox ftpd ready")
         while True:
             line = self.rfile.readline()
             if not line:
@@ -42,11 +52,10 @@ class FTP(socketserver.StreamRequestHandler):
         self.close_pasv()
 
     def cmd_user(self, arg):
-        self.user = arg
         self.reply("331 password required")
 
     def cmd_pass(self, arg):
-        if arg == PASS:
+        if arg == self.server.password:
             self.reply("230 logged in")
         else:
             self.reply("530 denied")
@@ -192,7 +201,7 @@ class FTP(socketserver.StreamRequestHandler):
                     if not chunk:
                         break
                     conn.sendall(chunk)
-            self.finish_data(conn)
+            conn.close()
         except OSError:
             pass
         self.reply("226 transfer complete")
@@ -272,13 +281,10 @@ class FTP(socketserver.StreamRequestHandler):
             return
         try:
             conn.sendall(data)
-            self.finish_data(conn)
+            conn.close()
         except OSError:
             pass
         self.reply("226 transfer complete")
-
-    def finish_data(self, conn):
-        conn.close()
 
     def open_pasv(self):
         self.close_pasv()
@@ -315,18 +321,24 @@ class FTP(socketserver.StreamRequestHandler):
         return offset
 
     def resolve(self, arg, create=False):
+        root = self.server.root
+        arg = arg or ""
+        base = self.cwd
+        if arg.startswith("/"):
+            base = root
+            arg = arg.lstrip("/")
         if not arg:
-            return self.cwd
-        target = os.path.abspath(os.path.join(self.cwd, arg))
-        prefix = ROOT.rstrip(os.sep) + os.sep
-        if target != ROOT and not target.startswith(prefix):
+            return base
+        target = os.path.abspath(os.path.join(base, arg))
+        prefix = root.rstrip(os.sep) + os.sep
+        if target != root and not target.startswith(prefix):
             return None
         if create and not os.path.isdir(os.path.dirname(target)):
             return None
         return target
 
     def rel(self, path):
-        rel = os.path.relpath(path, ROOT).replace(os.sep, "/")
+        rel = os.path.relpath(path, self.server.root).replace(os.sep, "/")
         return "/" if rel == "." else "/" + rel
 
     def listing(self, name):
@@ -339,17 +351,7 @@ class FTP(socketserver.StreamRequestHandler):
             return f"-rw-r--r-- 1 0 0 0 Jan 01 00:00 {name}\r\n"
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="my-sandbox ftpd")
-    parser.add_argument("--root", default=os.environ.get("FTP_ROOT") or os.path.expanduser("~"))
-    parser.add_argument("--user", default=os.environ.get("FTP_USER", "root"))
-    parser.add_argument("--pass", dest="password", default=os.environ.get("FTP_PASS", "myboxpass"))
-    parser.add_argument("--port", type=int, default=int(os.environ.get("FTP_PORT", 21)))
-    args = parser.parse_args()
-    ROOT = os.path.abspath(args.root)
-    USER = args.user
-    PASS = args.password
-    FTP.cwd = ROOT
-    socketserver.ThreadingTCPServer.allow_reuse_address = True
-    with socketserver.ThreadingTCPServer(("0.0.0.0", args.port), FTP) as server:
-        server.serve_forever()
+def start(port, root, user, password):
+    server = FtpServer(port, root, user, password)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server

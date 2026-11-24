@@ -1,4 +1,3 @@
-import argparse
 import queue
 import re
 import socket
@@ -7,7 +6,7 @@ import threading
 import time
 from urllib.parse import urlparse
 
-import ws
+from . import wsproto
 
 PASV = re.compile(rb"(\d+),(\d+),(\d+),(\d+),(\d+),(\d+)")
 EPSV = re.compile(rb"\(\|\|\|(\d+)\|\)")
@@ -29,6 +28,23 @@ def close_socket(sock):
         sock.close()
     except OSError:
         pass
+
+
+def parse(url):
+    """Split a box URL into (host, port, path, tls)."""
+    if "://" not in url:
+        url = "https://" + url
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https", "ws", "wss"):
+        raise ValueError(f"unsupported scheme: {parsed.scheme}")
+    if not parsed.hostname:
+        raise ValueError("missing host")
+    tls = parsed.scheme in ("https", "wss")
+    port = parsed.port or (443 if tls else 80)
+    path = parsed.path or "/"
+    if parsed.query:
+        path += "?" + parsed.query
+    return parsed.hostname, port, path, tls
 
 
 class Sink:
@@ -122,7 +138,7 @@ class FtpSink(Sink):
                 if head in FtpSink.TRANSFER:
                     with self.cond:
                         self.cache = None
-                    # 预取的 PASV 必须排在传输命令之后、且同一帧发出，服务端按序处理才不会抢掉本次数据端口
+                    # 预取的 PASV 必须跟在传输命令同一帧里发出，服务端按序处理才不会抢掉本次数据端口
                     line += self.take_prefetch()
                 return line
             self.reply(answer)
@@ -159,6 +175,12 @@ class Mux:
         threading.Thread(target=self._supervise, daemon=True).start()
         threading.Thread(target=self._keepalive, daemon=True).start()
 
+    def stop(self):
+        self.stopped = True
+        sock = self.sock
+        if sock is not None:
+            close_socket(sock)
+
     def _supervise(self):
         while not self.stopped:
             try:
@@ -166,6 +188,9 @@ class Mux:
             except (OSError, EOFError, RuntimeError):
                 time.sleep(2)
                 continue
+            if self.stopped:
+                close_socket(sock)
+                return
             self.sock = sock
             self.ready.set()
             self._reader(sock)
@@ -192,7 +217,7 @@ class Mux:
                 continue
             try:
                 with self.wlock:
-                    ws.send_frame(self.sock, 0x9, b"")
+                    wsproto.send_frame(self.sock, 0x9, b"")
             except (OSError, EOFError):
                 pass
 
@@ -202,7 +227,7 @@ class Mux:
             return
         try:
             with self.wlock:
-                ws.send_frame(sock, 0x2, HDR.pack(sid, kind) + data)
+                wsproto.send_frame(sock, 0x2, HDR.pack(sid, kind) + data)
         except (OSError, EOFError):
             pass
 
@@ -277,12 +302,12 @@ class Mux:
     def _reader(self, sock):
         try:
             while True:
-                opcode, payload = ws.recv_frame(sock)
+                opcode, payload = wsproto.recv_frame(sock)
                 if opcode == 0x8:
                     break
                 if opcode == 0x9:
                     with self.wlock:
-                        ws.send_frame(sock, 0xA, payload)
+                        wsproto.send_frame(sock, 0xA, payload)
                     continue
                 if opcode != 0x2 or len(payload) < HDR.size:
                     continue
@@ -327,7 +352,7 @@ class Mux:
         except (OSError, EOFError):
             pass
         finally:
-            ws.drain(sock)
+            wsproto.drain(sock)
 
 
 def data_lane(mux, remote):
@@ -369,85 +394,48 @@ def rewrite(line, mux):
     return line
 
 
-def ftp_session(local, mux):
-    local.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-    local.settimeout(None)
-    sink = FtpSink(local, mux)
-    sink.sid = mux.attach(21, sink)
+class Tunnel:
+    """A local set of listeners that mirror remote ports over one WebSocket."""
 
+    def __init__(self, url):
+        host, port, path, tls = parse(url)
+        self.mux = Mux(lambda: wsproto.connect(host, port, path, tls))
+        self.listeners = []
 
-def pipe(local, mux, remote):
-    local.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-    local.settimeout(None)
-    mux.attach(remote, Sink(local))
+    def wait_ready(self, timeout=15):
+        return self.mux.ready.wait(timeout)
 
+    def forward(self, remote, local=0):
+        listener = socket.socket()
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(("127.0.0.1", local))
+        listener.listen(16)
+        listener.settimeout(None)
+        actual = listener.getsockname()[1]
+        ftp = remote == 21
 
-def serve(port, handler):
-    listener = socket.socket()
-    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    listener.bind(("127.0.0.1", port))
-    listener.listen(16)
-    while True:
-        conn, _ = listener.accept()
-        threading.Thread(target=handler, args=(conn,), daemon=True).start()
+        def accept():
+            while True:
+                try:
+                    conn, _ = listener.accept()
+                except OSError:
+                    return
+                conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                conn.settimeout(None)
+                if ftp:
+                    sink = FtpSink(conn, self.mux)
+                    sink.sid = self.mux.attach(21, sink)
+                else:
+                    self.mux.attach(remote, Sink(conn))
 
+        self.listeners.append(listener)
+        threading.Thread(target=accept, daemon=True).start()
+        return actual
 
-def main():
-    parser = argparse.ArgumentParser(description="my-sandbox client")
-    parser.add_argument("--url", required=True, help="tunnel URL, e.g. https://host/?sharecode=XXX")
-    parser.add_argument("--ssh", type=int, metavar="PORT", help="expose remote ssh on local PORT")
-    parser.add_argument("--ftp", type=int, metavar="PORT", help="expose remote ftp on local PORT")
-    parser.add_argument(
-        "--forward", action="append", default=[], metavar="REMOTE:LOCAL",
-        help="forward remote port to local port, repeatable",
-    )
-    args = parser.parse_args()
-
-    forwards = []
-    for item in args.forward:
-        try:
-            remote, local = (int(part) for part in item.split(":"))
-        except ValueError:
-            parser.error(f"invalid --forward value: {item}")
-        forwards.append((remote, local, "tcp"))
-    if args.ssh:
-        forwards.append((22, args.ssh, "tcp"))
-    if args.ftp:
-        forwards.append((21, args.ftp, "ftp"))
-    if not forwards:
-        parser.error("nothing to forward: use --ssh, --ftp or --forward")
-
-    parsed = urlparse(args.url)
-    if parsed.scheme not in ("http", "https", "ws", "wss"):
-        parser.error(f"unsupported scheme: {parsed.scheme}")
-    if not parsed.hostname:
-        parser.error("missing host")
-    tls = parsed.scheme in ("https", "wss")
-    port = parsed.port or (443 if tls else 80)
-    path = parsed.path or "/"
-    if parsed.query:
-        path += "?" + parsed.query
-
-    def opener():
-        return ws.connect(parsed.hostname, port, path, tls)
-
-    mux = Mux(opener)
-    for remote, local, kind in forwards:
-        if kind == "ftp":
-            handler = lambda conn, m=mux: ftp_session(conn, m)
-        else:
-            handler = lambda conn, m=mux, r=remote: pipe(conn, m, r)
-        threading.Thread(target=serve, args=(local, handler), daemon=True).start()
-        print(f"127.0.0.1:{local} -> remote:{remote}")
-
-    try:
-        while not mux.ready.wait(1):
-            pass
-        while True:
-            time.sleep(3600)
-    except KeyboardInterrupt:
-        pass
-
-
-if __name__ == "__main__":
-    main()
+    def close(self):
+        self.mux.stop()
+        for listener in self.listeners:
+            try:
+                listener.close()
+            except OSError:
+                pass

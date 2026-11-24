@@ -1,4 +1,4 @@
-import argparse
+import functools
 import os
 import queue
 import socket
@@ -8,15 +8,9 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-import ws
+from . import ftpd, wsproto
 
-HERE = os.path.dirname(os.path.abspath(__file__))
 SSHD_CONFIG = "/tmp/mybox-sshd_config"
-SSHD_CONF = """Port 22
-PermitRootLogin yes
-PasswordAuthentication yes
-UsePAM no
-"""
 
 DATA, OPEN, FIN, RESET = 0, 1, 2, 3
 HDR = struct.Struct("!IB")
@@ -26,34 +20,21 @@ SHUTDOWN = object()
 ABORT = object()
 
 
-def start_sshd():
+def start_sshd(port):
+    conf = (
+        f"Port {port}\n"
+        "PermitRootLogin yes\n"
+        "PasswordAuthentication yes\n"
+        "UsePAM no\n"
+    )
     with open(SSHD_CONFIG, "w") as f:
-        f.write(SSHD_CONF)
+        f.write(conf)
     subprocess.run(
         ["/usr/sbin/sshd", "-f", SSHD_CONFIG],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         timeout=5,
     )
-
-
-def make_services(args):
-    env = dict(os.environ, FTP_PASS=args.ftp_pass)
-    return {
-        args.ftp_port: lambda: subprocess.Popen(
-            ["python3", os.path.join(HERE, "ftpd.py"),
-             "--root", args.ftp_root, "--user", args.ftp_user,
-             "--port", str(args.ftp_port)],
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        ),
-        22: start_sshd,
-    }
-
-
-start_lock = threading.Lock()
 
 
 def close_socket(sock):
@@ -76,31 +57,6 @@ def probe(port, timeout=1):
         return False
 
 
-def ensure(port, services):
-    starter = services.get(port)
-    if starter is None:
-        return True
-    if probe(port):
-        return True
-    with start_lock:
-        if probe(port):
-            return True
-        if port == 22:
-            try:
-                os.makedirs("/run/sshd", exist_ok=True)
-            except OSError:
-                pass
-        try:
-            starter()
-        except (OSError, subprocess.SubprocessError):
-            pass
-    for _ in range(50):
-        if probe(port, timeout=0.2):
-            return True
-        time.sleep(0.1)
-    return False
-
-
 class Mux:
     def __init__(self, conn, services):
         self.conn = conn
@@ -109,6 +65,7 @@ class Mux:
         self.lock = threading.Lock()
         self.streams = {}
         self.stopped = False
+        self.start_lock = threading.Lock()
         threading.Thread(target=self._keepalive, daemon=True).start()
 
     def _keepalive(self):
@@ -118,16 +75,40 @@ class Mux:
                 break
             try:
                 with self.wlock:
-                    ws.send_frame(self.conn, 0x9, b"", mask=False)
+                    wsproto.send_frame(self.conn, 0x9, b"", mask=False)
             except (OSError, EOFError):
                 break
 
     def send(self, sid, kind, data=b""):
         try:
             with self.wlock:
-                ws.send_frame(self.conn, 0x2, HDR.pack(sid, kind) + data, mask=False)
+                wsproto.send_frame(self.conn, 0x2, HDR.pack(sid, kind) + data, mask=False)
         except (OSError, EOFError):
             pass
+
+    def ensure(self, port):
+        starter = self.services.get(port)
+        if starter is None:
+            return True
+        if probe(port):
+            return True
+        with self.start_lock:
+            if probe(port):
+                return True
+            if port == 22:
+                try:
+                    os.makedirs("/run/sshd", exist_ok=True)
+                except OSError:
+                    pass
+            try:
+                starter()
+            except (OSError, subprocess.SubprocessError):
+                pass
+        for _ in range(50):
+            if probe(port, timeout=0.2):
+                return True
+            time.sleep(0.1)
+        return False
 
     def open(self, sid, port):
         entry = {
@@ -141,7 +122,7 @@ class Mux:
     def _connect(self, sid, entry, port):
         sock = None
         try:
-            if ensure(port, self.services):
+            if self.ensure(port):
                 sock = socket.create_connection(("127.0.0.1", port), timeout=10)
                 sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 sock.settimeout(None)
@@ -257,12 +238,12 @@ class Mux:
     def run(self):
         try:
             while True:
-                opcode, payload = ws.recv_frame(self.conn)
+                opcode, payload = wsproto.recv_frame(self.conn)
                 if opcode == 0x8:
                     break
                 if opcode == 0x9:
                     with self.wlock:
-                        ws.send_frame(self.conn, 0xA, payload, mask=False)
+                        wsproto.send_frame(self.conn, 0xA, payload, mask=False)
                     continue
                 if opcode != 0x2 or len(payload) < HDR.size:
                     continue
@@ -293,7 +274,7 @@ class Mux:
                     pass
                 if sock:
                     close_socket(sock)
-            ws.drain(self.conn)
+            wsproto.drain(self.conn)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -306,11 +287,11 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
         self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        ws.keepalive(self.connection)
+        wsproto.keepalive(self.connection)
         self.send_response(101, "Switching Protocols")
         self.send_header("Upgrade", "websocket")
         self.send_header("Connection", "Upgrade")
-        self.send_header("Sec-WebSocket-Accept", ws.accept_key(key))
+        self.send_header("Sec-WebSocket-Accept", wsproto.accept_key(key))
         self.end_headers()
         Mux(self.connection, self.server.services).run()
 
@@ -318,15 +299,18 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="my-sandbox server")
-    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", 3000)))
-    parser.add_argument("--ftp-port", type=int, default=int(os.environ.get("FTP_PORT", 21)))
-    parser.add_argument("--ftp-root", default=os.environ.get("FTP_ROOT") or "/")
-    parser.add_argument("--ftp-user", default=os.environ.get("FTP_USER", "root"))
-    parser.add_argument("--ftp-pass", default=os.environ.get("FTP_PASS", "myboxpass"))
-    args = parser.parse_args()
+def run(args):
     os.makedirs(args.ftp_root, exist_ok=True)
+    services = {
+        args.ftp_port: functools.partial(
+            ftpd.start, args.ftp_port, args.ftp_root, args.ftp_user, args.ftp_pass
+        ),
+        args.ssh_port: functools.partial(start_sshd, args.ssh_port),
+    }
     server = ThreadingHTTPServer(("0.0.0.0", args.port), Handler)
-    server.services = make_services(args)
-    server.serve_forever()
+    server.services = services
+    print(f"mybox serve: http {args.port}, ssh {args.ssh_port}, ftp {args.ftp_port} ({args.ftp_root})", flush=True)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
