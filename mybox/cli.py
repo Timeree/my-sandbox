@@ -5,7 +5,7 @@ import subprocess
 import sys
 import tempfile
 
-from . import __version__, boxes, ftpd, serve, tunnel
+from . import __version__, boxes, serve, tunnel
 
 REPO = "git+https://github.com/Timeree/my-sandbox.git@main"
 
@@ -58,15 +58,6 @@ def askpass(password):
         f.write(f"#!/bin/sh\nprintf %s '{blob}' | base64 -d\n")
     os.chmod(path, 0o700)
     return path
-
-
-def cmd_ftp(args):
-    print(f"mybox ftp: 0.0.0.0:{args.port} root / no password", flush=True)
-    try:
-        ftpd.serve(args.port, "/")
-    except KeyboardInterrupt:
-        pass
-    return 0
 
 
 def cmd_serve(args):
@@ -132,6 +123,8 @@ def cmd_ssh(args):
         forwards = parse_forwards(args.forward)
     except ValueError as exc:
         sys.exit(str(exc))
+    if args.ftp is not None:
+        forwards.append((2121, args.ftp, True))
 
     box = tunnel.Tunnel(store[name]["url"])
     if not box.wait_ready(20):
@@ -189,11 +182,8 @@ def main(argv=None):
     p = sub.add_parser("serve", help="run the server side")
     p.add_argument("--port", type=int, default=int(os.environ.get("PORT", 3000)))
     p.add_argument("--ssh-port", type=int, default=int(os.environ.get("SSH_PORT", 22)))
+    p.add_argument("--ftp-port", type=int, default=int(os.environ.get("FTP_PORT", 2121)))
     p.set_defaults(func=cmd_serve)
-
-    p = sub.add_parser("ftp", help="run a no-auth full-access ftp server on this host")
-    p.add_argument("port", nargs="?", type=int, default=2121, help="listen port, 2121 by default")
-    p.set_defaults(func=cmd_ftp)
 
     p = sub.add_parser("add", help="remember a box url")
     p.add_argument("items", nargs="+", metavar="[name] url")
@@ -213,6 +203,8 @@ def main(argv=None):
     p.add_argument("name", nargs="?", help="box name, defaults to the first one")
     p.add_argument("-f", "--forward", action="append", default=[], metavar="REMOTE:LOCAL",
                    help="also forward remote port to local port, repeatable")
+    p.add_argument("--ftp", type=int, metavar="LOCAL_PORT",
+                   help="map the box's ftp (2121) to this local port")
     p.add_argument("--remote-port", type=int, default=22, help="sshd port on the box")
     p.add_argument("--local-port", type=int, default=0, help="local port for ssh, random by default")
     p.add_argument("--user", default=os.environ.get("MYBOX_USER", "root"))

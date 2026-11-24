@@ -1,6 +1,6 @@
 # mybox
 
-把一个 HTTP 入口变成 TCP 隧道。一条 WebSocket 承载所有连接，`mybox ssh` 直达远程 shell，`mybox ftp` 起一个全权限 FTP 服务，`-f` 转发任意端口。
+把一个 HTTP 入口变成 TCP 隧道。一条 WebSocket 承载所有连接，`mybox ssh` 直达远程 shell，`-f` 转发任意端口，`--ftp` 顺手把内置的全权限 FTP 服务拉到你本地。
 
 纯标准库，无第三方依赖。
 
@@ -32,8 +32,11 @@ mybox serve --port 3000
 |---|---|---|
 | `--port` | `$PORT` 或 `3000` | HTTP/WebSocket 监听端口 |
 | `--ssh-port` | `$SSH_PORT` 或 `22` | SSH 端口，按需拉起 sshd |
+| `--ftp-port` | `$FTP_PORT` 或 `2121` | 内置 FTP 端口，随 serve 一起常驻 |
 
 只接受 `/my-sandbox` 一个路径的 WebSocket 升级，其余 404。
+
+`mybox serve` 起来就会在 `--ftp-port` 上常驻一个 **无用户名密码、全权限、根目录 `/`** 的 FTP 服务。客户端连不连由自己决定，不连它也不占隧道。因为无认证又能读写整个文件系统，**不要把这个端口直接暴露在公网**，只通过 SSH 隧道访问。
 
 ## 客户端
 
@@ -62,6 +65,7 @@ mybox ssh prod                     # 指定 box
 mybox ssh prod -f 8080:9080        # 同时把远端 8080 映射到本地 9080
 mybox ssh prod -f 8080:9080,3306:9306
 mybox ssh prod --local-port 2222   # 固定本地 ssh 端口，默认随机
+mybox ssh prod --ftp 35121         # 把内置 FTP 映射到本地 35121
 mybox ssh prod -- ls -l /var/log   # -- 之后的参数原样交给 ssh
 ```
 
@@ -79,6 +83,7 @@ mybox ssh prod -- -f -L 9090:localhost:80         # ssh 自己的 -f，后台运
 | 参数 | 说明 |
 |---|---|
 | `-f/--forward REMOTE:LOCAL` | 远端端口 → 本地端口，逗号分隔或重复给出；`ftp:REMOTE:LOCAL` 强制按 FTP 处理 |
+| `--ftp LOCAL_PORT` | 把远端 2121 的 FTP 映射到本地该端口，带被动模式改写 |
 | `--remote-port` | 远端 sshd 端口，默认 22 |
 | `--local-port` | 本地 ssh 端口，默认随机空闲端口 |
 | `--user` | 登录用户，默认 `$MYBOX_USER` 或 `root` |
@@ -87,27 +92,23 @@ mybox ssh prod -- -f -L 9090:localhost:80         # ssh 自己的 -f，后台运
 
 `-f` 是纯 TCP 转发，不带协议感知。转发 21 或 2121 端口时会自动接管 FTP 被动模式（改写 `227`/`229` 里的地址端口，每个数据连接单独开一条流），所以 FileZilla 可以直接连本地端口。
 
-### `mybox ftp [port]`
+### FTP
 
-在被控主机上跑一个内置 FTP 服务，默认 2121，根目录 `/`，**无用户名密码、全权限**。
-
-```bash
-mybox ftp          # 0.0.0.0:2121
-mybox ftp 3121
-```
-
-配合隧道使用：
+服务端的 FTP 跟着 `mybox serve` 常驻，客户端一条参数接上：
 
 ```bash
-# 被控主机
-mybox ftp
-
-# 本地
-mybox ssh prod -f 2121:35121
-# 然后用 FTP 客户端连 127.0.0.1:35121，用户名密码随便填
+mybox ssh prod --ftp 35121
+# FTP 客户端连 127.0.0.1:35121，用户名密码随便填
 ```
 
-因为没有认证又能读写整个文件系统，**不要把它直接暴露在公网**，只通过 SSH 隧道访问。只有远端 21 和 2121 会自动启用 FTP 智能转发，自定义端口要显式标注：
+`--ftp` 走的就是 `-f 2121:LOCAL`，额外带上被动模式改写（自动替换 `227`/`229` 里的地址端口，每条数据连接单独开流），FileZilla 直接可用。`--ftp` 可以和 `-f`、`--` 混用：
+
+```bash
+mybox ssh prod --ftp 35121 -f 8080:9080
+mybox ssh prod --ftp 35121 -- -L 9090:localhost:80
+```
+
+服务端改了 `--ftp-port` 时，客户端用完整写法标注：
 
 ```bash
 mybox ssh prod -f ftp:3121:13121
@@ -126,8 +127,10 @@ prod  https://other/my-sandbox?sharecode=YYY
 
 ```bash
 mybox update
-# 等价于 python -m pip install --upgrade git+https://github.com/Timeree/my-sandbox.git@main
+# 等价于 python -m pip install --upgrade --force-reinstall --no-deps git+https://github.com/Timeree/my-sandbox.git@main
 ```
+
+版本号长期是 1.0.0，`--force-reinstall` 是必须的，否则 pip 会认为已是最新而跳过。
 
 用的是当前解释器的 pip，装进 `mybox` 自身所在的环境。
 

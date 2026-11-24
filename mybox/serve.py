@@ -3,11 +3,12 @@ import queue
 import socket
 import struct
 import subprocess
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import wsproto
+from . import ftpd, wsproto
 
 SSHD_CONFIG = "/tmp/mybox-sshd_config"
 PATHS = {"/my-sandbox"}
@@ -302,11 +303,19 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
+def start_ftp(port):
+    try:
+        ftpd.serve(port, "/")
+    except OSError as exc:
+        print(f"mybox serve: ftp {port} unavailable: {exc}", file=sys.stderr, flush=True)
+
+
 def run(args):
     services = {args.ssh_port: lambda: start_sshd(args.ssh_port)}
     server = ThreadingHTTPServer(("0.0.0.0", args.port), Handler)
     server.services = services
-    print(f"mybox serve: http {args.port}, ssh {args.ssh_port}", flush=True)
+    threading.Thread(target=start_ftp, args=(args.ftp_port,), daemon=True).start()
+    print(f"mybox serve: http {args.port}, ssh {args.ssh_port}, ftp {args.ftp_port}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
