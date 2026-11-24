@@ -1,11 +1,23 @@
 import json
 import os
 from pathlib import Path
+from urllib.parse import urlparse, urlunparse
 
 from . import tunnel, wsproto
 
 DIR = Path(os.environ.get("MYBOX_CONFIG_DIR") or Path.home() / ".config" / "mybox")
 FILE = DIR / "boxes.json"
+PATH = "/my-sandbox"
+
+
+def normalize(url):
+    """Give bare urls a scheme and the /my-sandbox path marker."""
+    if "://" not in url:
+        url = "https://" + url
+    parsed = urlparse(url)
+    if parsed.path in ("", "/"):
+        parsed = parsed._replace(path=PATH)
+    return urlunparse(parsed)
 
 
 def load():

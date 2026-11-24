@@ -1,4 +1,3 @@
-import functools
 import os
 import queue
 import socket
@@ -8,9 +7,10 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import ftpd, wsproto
+from . import wsproto
 
 SSHD_CONFIG = "/tmp/mybox-sshd_config"
+PATHS = {"/", "/my-sandbox", "/my-sandbox/"}
 
 DATA, OPEN, FIN, RESET = 0, 1, 2, 3
 HDR = struct.Struct("!IB")
@@ -286,6 +286,9 @@ class Handler(BaseHTTPRequestHandler):
         if not key or self.headers.get("Upgrade", "").lower() != "websocket":
             self.send_error(404)
             return
+        if self.path.split("?", 1)[0] not in PATHS:
+            self.send_error(404)
+            return
         self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         wsproto.keepalive(self.connection)
         self.send_response(101, "Switching Protocols")
@@ -300,16 +303,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def run(args):
-    os.makedirs(args.ftp_root, exist_ok=True)
-    services = {
-        args.ftp_port: functools.partial(
-            ftpd.start, args.ftp_port, args.ftp_root, args.ftp_user, args.ftp_pass
-        ),
-        args.ssh_port: functools.partial(start_sshd, args.ssh_port),
-    }
+    services = {args.ssh_port: lambda: start_sshd(args.ssh_port)}
     server = ThreadingHTTPServer(("0.0.0.0", args.port), Handler)
     server.services = services
-    print(f"mybox serve: http {args.port}, ssh {args.ssh_port}, ftp {args.ftp_port} ({args.ftp_root})", flush=True)
+    print(f"mybox serve: http {args.port}, ssh {args.ssh_port}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

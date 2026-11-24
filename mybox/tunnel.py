@@ -1,5 +1,4 @@
 import queue
-import re
 import socket
 import struct
 import threading
@@ -8,9 +7,6 @@ from urllib.parse import urlparse
 
 from . import wsproto
 
-PASV = re.compile(rb"(\d+),(\d+),(\d+),(\d+),(\d+),(\d+)")
-EPSV = re.compile(rb"\(\|\|\|(\d+)\|\)")
-DATA_TIMEOUT = 30
 PING_INTERVAL = 15
 DATA, OPEN, FIN, RESET = 0, 1, 2, 3
 HDR = struct.Struct("!IB")
@@ -65,101 +61,6 @@ class Sink:
 
     def close(self):
         close_socket(self.sock)
-
-
-class FtpSink(Sink):
-    LOCAL = {
-        b"TYPE": b"200 type set\r\n",
-        b"OPTS": b"200 ok\r\n",
-        b"CLNT": b"200 ok\r\n",
-        b"ALLO": b"200 ok\r\n",
-        b"SITE": b"200 ok\r\n",
-        b"NOOP": b"200 ok\r\n",
-    }
-    TRANSFER = {b"LIST", b"NLST", b"RETR", b"STOR", b"APPE", b"MLSD"}
-
-    def __init__(self, sock, mux):
-        super().__init__(sock)
-        self.mux = mux
-        self.buf = b""
-        self.rbuf = b""
-        self.sid = None
-        self.cache = None
-        self.hidden = 0
-        self.used_pasv = False
-        self.lock = threading.Lock()
-        self.cond = threading.Condition()
-
-    def take_prefetch(self):
-        with self.cond:
-            if not self.used_pasv or self.cache is not None or self.hidden or self.sid is None:
-                return b""
-            self.hidden = 1
-            return b"PASV\r\n"
-
-    def reply(self, data):
-        try:
-            with self.lock:
-                self.sock.sendall(data)
-        except OSError:
-            pass
-
-    def recv(self):
-        while True:
-            while b"\r\n" not in self.rbuf:
-                data = self.sock.recv(65536)
-                if not data:
-                    line, self.rbuf = self.rbuf, b""
-                    return line
-                self.rbuf += data
-            line, self.rbuf = self.rbuf.split(b"\r\n", 1)
-            line += b"\r\n"
-            head = line.split(b" ", 1)[0].strip().upper()
-            if head in (b"PASV", b"EPSV"):
-                with self.cond:
-                    self.used_pasv = True
-                    while self.cache is None and self.hidden:
-                        self.cond.wait(5)
-                    if self.cache is None and self.hidden:
-                        self.hidden -= 1
-                    port = self.cache
-                    self.cache = None
-                if port is not None:
-                    local = data_lane(self.mux, port)
-                    if head == b"PASV":
-                        text = f"227 Entering Passive Mode (127,0,0,1,{local // 256},{local % 256})\r\n"
-                    else:
-                        text = f"229 Entering Extended Passive Mode (|||{local}|)\r\n"
-                    self.reply(text.encode())
-                    continue
-                return line
-            answer = self.LOCAL.get(head)
-            if answer is None:
-                if head in FtpSink.TRANSFER:
-                    with self.cond:
-                        self.cache = None
-                    # 预取的 PASV 必须跟在传输命令同一帧里发出，服务端按序处理才不会抢掉本次数据端口
-                    line += self.take_prefetch()
-                return line
-            self.reply(answer)
-
-    def feed(self, data):
-        self.buf += data
-        while b"\r\n" in self.buf:
-            line, self.buf = self.buf.split(b"\r\n", 1)
-            if line.startswith((b"425", b"426")):
-                with self.cond:
-                    self.cache = None
-            if line.startswith((b"227", b"229")):
-                with self.cond:
-                    if self.hidden:
-                        self.hidden -= 1
-                        match = PASV.search(line) if line.startswith(b"227") else None
-                        if self.cache is None and match:
-                            self.cache = int(match.group(5)) * 256 + int(match.group(6))
-                        self.cond.notify_all()
-                        continue
-            self.reply(rewrite(line, self.mux) + b"\r\n")
 
 
 class Mux:
@@ -355,45 +256,6 @@ class Mux:
             wsproto.drain(sock)
 
 
-def data_lane(mux, remote):
-    listener = socket.socket()
-    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    listener.bind(("127.0.0.1", 0))
-    listener.listen(1)
-    listener.settimeout(DATA_TIMEOUT)
-    port = listener.getsockname()[1]
-
-    def run():
-        try:
-            conn, _ = listener.accept()
-            conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            conn.settimeout(None)
-            mux.attach(remote, Sink(conn))
-        except OSError:
-            pass
-        finally:
-            listener.close()
-
-    threading.Thread(target=run, daemon=True).start()
-    return port
-
-
-def rewrite(line, mux):
-    if line.startswith(b"227"):
-        match = PASV.search(line)
-        if match:
-            remote = int(match.group(5)) * 256 + int(match.group(6))
-            local = data_lane(mux, remote)
-            return line[:match.start()] + f"127,0,0,1,{local // 256},{local % 256}".encode() + line[match.end():]
-    elif line.startswith(b"229"):
-        match = EPSV.search(line)
-        if match:
-            remote = int(match.group(1))
-            local = data_lane(mux, remote)
-            return line[:match.start()] + f"(|||{local}|)".encode() + line[match.end():]
-    return line
-
-
 class Tunnel:
     """A local set of listeners that mirror remote ports over one WebSocket."""
 
@@ -412,7 +274,6 @@ class Tunnel:
         listener.listen(16)
         listener.settimeout(None)
         actual = listener.getsockname()[1]
-        ftp = remote == 21
 
         def accept():
             while True:
@@ -422,11 +283,7 @@ class Tunnel:
                     return
                 conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 conn.settimeout(None)
-                if ftp:
-                    sink = FtpSink(conn, self.mux)
-                    sink.sid = self.mux.attach(21, sink)
-                else:
-                    self.mux.attach(remote, Sink(conn))
+                self.mux.attach(remote, Sink(conn))
 
         self.listeners.append(listener)
         threading.Thread(target=accept, daemon=True).start()

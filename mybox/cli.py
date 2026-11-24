@@ -44,8 +44,7 @@ def cmd_add(args):
     else:
         sys.exit("usage: mybox add [name] <url>")
 
-    if "://" not in url:
-        url = "https://" + url
+    url = boxes.normalize(url)
     store = boxes.load()
     if name is None:
         name = boxes.next_name(store)
@@ -93,7 +92,7 @@ def cmd_ssh(args):
         box.close()
         sys.exit(f"cannot reach {name}: {store[name]['url']}")
 
-    ssh_port = box.forward(22, args.ssh_port)
+    ssh_port = box.forward(args.remote_port, args.local_port)
     for remote, local in forwards:
         try:
             box.forward(remote, local)
@@ -128,17 +127,13 @@ def cmd_ssh(args):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(prog="mybox", description="Tunnel SSH and FTP through one WebSocket.")
+    parser = argparse.ArgumentParser(prog="mybox", description="Tunnel SSH over one WebSocket.")
     parser.add_argument("--version", action="version", version=f"mybox {__version__}")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("serve", help="run the server side")
     p.add_argument("--port", type=int, default=int(os.environ.get("PORT", 3000)))
     p.add_argument("--ssh-port", type=int, default=int(os.environ.get("SSH_PORT", 22)))
-    p.add_argument("--ftp-port", type=int, default=int(os.environ.get("FTP_PORT", 21)))
-    p.add_argument("--ftp-root", default=os.environ.get("FTP_ROOT") or "/")
-    p.add_argument("--ftp-user", default=os.environ.get("FTP_USER", "root"))
-    p.add_argument("--ftp-pass", default=os.environ.get("FTP_PASS", "myboxpass"))
     p.set_defaults(func=cmd_serve)
 
     p = sub.add_parser("add", help="remember a box url")
@@ -149,7 +144,8 @@ def main(argv=None):
     p.add_argument("name", nargs="?", help="box name, defaults to the first one")
     p.add_argument("-f", "--forward", action="append", default=[], metavar="REMOTE:LOCAL",
                    help="also forward remote port to local port, repeatable")
-    p.add_argument("--ssh-port", type=int, default=0, help="local port for ssh, random by default")
+    p.add_argument("--remote-port", type=int, default=22, help="sshd port on the box")
+    p.add_argument("--local-port", type=int, default=0, help="local port for ssh, random by default")
     p.add_argument("--user", default=os.environ.get("MYBOX_USER", "root"))
     p.add_argument("--password", default=os.environ.get("MYBOX_PASS", "myboxpass"))
     p.set_defaults(func=cmd_ssh)

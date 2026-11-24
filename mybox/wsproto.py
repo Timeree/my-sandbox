@@ -96,7 +96,7 @@ def connect(host, port, path, tls):
     while b"\r\n\r\n" not in header:
         header += recv_exact(sock, 1)
     if b"101" not in header.split(b"\r\n")[0]:
-        raise RuntimeError(header.decode(errors="replace"))
+        raise RuntimeError(header.split(b"\r\n", 1)[0].decode(errors="replace"))
     sock.settimeout(None)
     return sock
 
