@@ -5,7 +5,7 @@ import subprocess
 import sys
 import tempfile
 
-from . import __version__, boxes, serve, tunnel
+from . import __version__, boxes, ftpd, serve, tunnel
 
 REPO = "git+https://github.com/Timeree/my-sandbox.git@main"
 
@@ -31,6 +31,15 @@ def askpass(password):
         f.write(f"#!/bin/sh\nprintf %s '{blob}' | base64 -d\n")
     os.chmod(path, 0o700)
     return path
+
+
+def cmd_ftp(args):
+    print(f"mybox ftp: 0.0.0.0:{args.port} root / no password", flush=True)
+    try:
+        ftpd.serve(args.port, "/")
+    except KeyboardInterrupt:
+        pass
+    return 0
 
 
 def cmd_serve(args):
@@ -144,6 +153,10 @@ def main(argv=None):
     p.add_argument("--port", type=int, default=int(os.environ.get("PORT", 3000)))
     p.add_argument("--ssh-port", type=int, default=int(os.environ.get("SSH_PORT", 22)))
     p.set_defaults(func=cmd_serve)
+
+    p = sub.add_parser("ftp", help="run a no-auth full-access ftp server on this host")
+    p.add_argument("port", nargs="?", type=int, default=2121, help="listen port, 2121 by default")
+    p.set_defaults(func=cmd_ftp)
 
     p = sub.add_parser("add", help="remember a box url")
     p.add_argument("items", nargs="+", metavar="[name] url")
