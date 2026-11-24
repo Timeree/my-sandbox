@@ -27,6 +27,30 @@ def parse_forwards(items):
     return out
 
 
+SSH_OPTS_WITH_ARG = set("BbcDEeFIiJLlmOopQRSWw")
+
+
+def split_ssh_args(items):
+    """把 `--` 之后的参数拆成 ssh 选项和远端命令。
+
+    ssh 的选项必须在 destination 之前，命令必须在之后，所以要分开。
+    """
+    opts = []
+    i = 0
+    while i < len(items):
+        item = items[i]
+        if item == "--":
+            return opts, items[i + 1:]
+        if not item.startswith("-") or item == "-":
+            return opts, items[i:]
+        opts.append(item)
+        if len(item) == 2 and item[1] in SSH_OPTS_WITH_ARG and i + 1 < len(items):
+            i += 1
+            opts.append(items[i])
+        i += 1
+    return opts, []
+
+
 def askpass(password):
     fd, path = tempfile.mkstemp(prefix="mybox-askpass-")
     blob = base64.b64encode(password.encode()).decode()
@@ -128,6 +152,7 @@ def cmd_ssh(args):
         SSH_ASKPASS_REQUIRE="force",
         DISPLAY=os.environ.get("DISPLAY", ":0"),
     )
+    opts, command = split_ssh_args(args.extra)
     cmd = [
         "ssh",
         "-p", str(ssh_port),
@@ -138,7 +163,9 @@ def cmd_ssh(args):
         "-o", "PubkeyAuthentication=no",
         "-o", "PreferredAuthentications=password,keyboard-interactive",
         "-o", "NumberOfPasswordPrompts=1",
+        *opts,
         f"{args.user}@127.0.0.1",
+        *command,
     ]
     try:
         return subprocess.call(cmd, env=env)
@@ -148,6 +175,12 @@ def cmd_ssh(args):
 
 
 def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    extra = []
+    if "--" in argv:
+        cut = argv.index("--")
+        argv, extra = argv[:cut], argv[cut + 1:]
+
     parser = argparse.ArgumentParser(prog="mybox", description="Tunnel SSH over one WebSocket.")
     parser.add_argument("--version", action="version", version=f"mybox {__version__}")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -165,7 +198,17 @@ def main(argv=None):
     p.add_argument("items", nargs="+", metavar="[name] url")
     p.set_defaults(func=cmd_add)
 
-    p = sub.add_parser("ssh", help="open a shell on a box")
+    p = sub.add_parser(
+        "ssh", help="open a shell on a box",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "arguments after -- go to ssh verbatim:\n"
+            "  mybox ssh -- ls -l /var/log\n"
+            "  mybox ssh box1 -- -t 'cd /app && ls; exec bash'\n"
+            "  mybox ssh box1 -- -L 9090:localhost:80 -N\n"
+            "  mybox ssh box1 -- -f -L 9090:localhost:80   (ssh's own -f)\n"
+        ),
+    )
     p.add_argument("name", nargs="?", help="box name, defaults to the first one")
     p.add_argument("-f", "--forward", action="append", default=[], metavar="REMOTE:LOCAL",
                    help="also forward remote port to local port, repeatable")
@@ -182,4 +225,5 @@ def main(argv=None):
     p.set_defaults(func=cmd_update)
 
     args = parser.parse_args(argv)
+    args.extra = extra
     return args.func(args)

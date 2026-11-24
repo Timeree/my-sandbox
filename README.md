@@ -56,7 +56,19 @@ mybox ssh prod                     # 指定 box
 mybox ssh prod -f 8080:9080        # 同时把远端 8080 映射到本地 9080
 mybox ssh prod -f 8080:9080,3306:9306
 mybox ssh prod --local-port 2222   # 固定本地 ssh 端口，默认随机
+mybox ssh prod -- ls -l /var/log   # -- 之后的参数原样交给 ssh
 ```
+
+`--` 后面的东西不会经过 mybox 解析，选项插在目标主机之前，命令跟在主机之后，跟原生 `ssh` 完全一致。因此可以用它做初始自动执行，或者干任何 mybox 没封装的事：
+
+```bash
+mybox ssh prod -- 'uptime; df -h'
+mybox ssh prod -- -t 'cd /app && ls; exec bash'   # 进目录、看一眼、留在 shell 里
+mybox ssh prod -- -L 9090:localhost:80 -N         # 只做端口转发
+mybox ssh prod -- -f -L 9090:localhost:80         # ssh 自己的 -f，后台运行
+```
+
+注意 mybox 自己也占用了 `-f`（转发），要用 ssh 的 `-f` 必须放到 `--` 之后。多条命令要整体加引号传一个字符串，否则会被 ssh 按空格重新拼接。
 
 | 参数 | 说明 |
 |---|---|
@@ -65,6 +77,7 @@ mybox ssh prod --local-port 2222   # 固定本地 ssh 端口，默认随机
 | `--local-port` | 本地 ssh 端口，默认随机空闲端口 |
 | `--user` | 登录用户，默认 `$MYBOX_USER` 或 `root` |
 | `--password` | 登录密码，默认 `$MYBOX_PASS` 或 `myboxpass` |
+| `-- ...` | 之后的内容原样传给 ssh（选项/命令/转发） |
 
 `-f` 是纯 TCP 转发，不带协议感知。转发 21 或 2121 端口时会自动接管 FTP 被动模式（改写 `227`/`229` 里的地址端口，每个数据连接单独开一条流），所以 FileZilla 可以直接连本地端口。
 
