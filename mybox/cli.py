@@ -7,7 +7,7 @@ import tempfile
 
 from . import __version__, boxes, ftpd, serve, tunnel
 
-REPO = "https://codeload.github.com/Timeree/my-sandbox/tar.gz/refs/heads/main"
+REPO = "git+https://github.com/Timeree/my-sandbox.git@main"
 
 
 def parse_forwards(items):
