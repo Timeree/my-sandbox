@@ -17,10 +17,13 @@ def parse_forwards(items):
             part = part.strip()
             if not part:
                 continue
+            ftp = None
+            if part.startswith("ftp:"):
+                part, ftp = part[4:], True
             remote, sep, local = part.partition(":")
             if not sep or not remote.isdigit() or not local.isdigit():
                 raise ValueError(f"invalid forward: {part}")
-            out.append((int(remote), int(local)))
+            out.append((int(remote), int(local), ftp))
     return out
 
 
@@ -111,9 +114,9 @@ def cmd_ssh(args):
         sys.exit(f"cannot reach {name}: {store[name]['url']}")
 
     ssh_port = box.forward(args.remote_port, args.local_port)
-    for remote, local in forwards:
+    for remote, local, ftp in forwards:
         try:
-            box.forward(remote, local)
+            box.forward(remote, local, ftp)
         except OSError as exc:
             box.close()
             sys.exit(f"cannot listen on 127.0.0.1:{local}: {exc}")

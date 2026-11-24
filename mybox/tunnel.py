@@ -406,14 +406,15 @@ class Tunnel:
     def wait_ready(self, timeout=15):
         return self.mux.ready.wait(timeout)
 
-    def forward(self, remote, local=0):
+    def forward(self, remote, local=0, ftp=None):
         listener = socket.socket()
         listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         listener.bind(("127.0.0.1", local))
         listener.listen(16)
         listener.settimeout(None)
         actual = listener.getsockname()[1]
-        ftp = remote in FTP_PORTS
+        if ftp is None:
+            ftp = remote in FTP_PORTS
 
         def accept():
             while True:
