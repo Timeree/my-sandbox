@@ -66,7 +66,10 @@ def cmd_add(args):
 
 
 def cmd_update(args):
-    return subprocess.call([sys.executable, "-m", "pip", "install", "--upgrade", REPO])
+    rc = subprocess.call([sys.executable, "-m", "pip", "install", "--upgrade", REPO])
+    if rc:
+        print("update failed, check the network and retry", file=sys.stderr)
+    return rc
 
 
 def cmd_ls(args):
