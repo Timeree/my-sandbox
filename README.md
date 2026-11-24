@@ -60,8 +60,8 @@ python3 client/client.py --url https://host/?sharecode=XXX --forward 3000:8080
 
 - 一条 WebSocket 复用所有 TCP 流：帧头 `sid(4) + kind(1)`，kind 为 `DATA / OPEN / FIN / RESET`。
 - 客户端首次转发才建 WebSocket，之后所有连接（含 FTP 数据连接）共用同一条，断线自动重连。
-- 半关闭而非硬断：一侧 `shutdown(SHUT_WR)` 转成 FIN 帧，两个方向都 FIN 才关闭 socket，避免发送缓冲区里的数据被丢弃。
-- 服务端 `OPEN` 异步建连，建连期间数据入队，不阻塞读循环。
+- 每个流独立发送队列和写线程，共享读循环只做非阻塞入队；某条流的对端不读只堵它自己，不会拖垮整条隧道。队列有上限，积压溢出时丢弃该流而非无限占内存。
+- 半关闭而非硬断：一侧 `shutdown(SHUT_WR)` 转成 FIN 帧，两个方向都 FIN 且写线程排空后才关闭 socket，避免发送缓冲区里的数据被丢弃。
 - 服务端对 22/21 做健康探测，缺失时拉起 sshd / ftpd.py，轮询等待就绪后建连。
 - 两端 `TCP_NODELAY`，关掉 Nagle 与延迟 ACK 叠加出的 40ms 固定停顿。
 - FTP 被动模式：客户端拦截 `227`/`229`，本地起临时监听并把端口回给 FTP 客户端，数据连接再映射到远端 PASV 端口。

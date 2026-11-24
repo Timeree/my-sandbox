@@ -1,4 +1,5 @@
 import argparse
+import queue
 import re
 import socket
 import struct
@@ -14,6 +15,9 @@ DATA_TIMEOUT = 30
 PING_INTERVAL = 15
 DATA, OPEN, FIN, RESET = 0, 1, 2, 3
 HDR = struct.Struct("!IB")
+QMAX = 128
+SHUTDOWN = object()
+ABORT = object()
 
 
 def close_socket(sock):
@@ -170,6 +174,12 @@ class Mux:
                 entries = list(self.streams.values())
                 self.streams.clear()
             for entry in entries:
+                with entry["lock"]:
+                    entry["closed"] = True
+                try:
+                    entry["outq"].put_nowait(ABORT)
+                except queue.Full:
+                    pass
                 entry["sink"].close()
             self.next_id = 0
             close_socket(sock)
@@ -200,13 +210,38 @@ class Mux:
         if not self.ready.wait(15):
             sink.close()
             return
+        entry = {"sink": sink, "outq": queue.Queue(QMAX), "local_fin": False,
+                 "remote_fin": False, "lock": threading.Lock(), "closed": False, "w_done": False}
         with self.lock:
             self.next_id += 1
             sid = self.next_id
-            self.streams[sid] = {"sink": sink, "local_fin": False, "remote_fin": False}
+            self.streams[sid] = entry
         self.send(sid, OPEN, struct.pack("!H", remote))
         threading.Thread(target=self._pump, args=(sid, sink), daemon=True).start()
+        threading.Thread(target=self._writer, args=(sid, entry), daemon=True).start()
         return sid
+
+    def _writer(self, sid, entry):
+        outq = entry["outq"]
+        sink = entry["sink"]
+        try:
+            while True:
+                item = outq.get()
+                if item is ABORT:
+                    return
+                if item is SHUTDOWN:
+                    sink.shutdown_wr()
+                    return
+                sink.feed(item)
+        except OSError:
+            self.send(sid, RESET)
+            self._finish(sid, local=True, remote=True)
+        finally:
+            with entry["lock"]:
+                entry["w_done"] = True
+                ready = entry["closed"]
+            if ready:
+                sink.close()
 
     def _pump(self, sid, sink):
         try:
@@ -226,13 +261,18 @@ class Mux:
             entry = self.streams.get(sid)
             if not entry:
                 return
+        with entry["lock"]:
             entry["local_fin"] |= local
             entry["remote_fin"] |= remote
             done = entry["local_fin"] and entry["remote_fin"]
+            ready = entry["w_done"]
             if done:
-                del self.streams[sid]
+                entry["closed"] = True
         if done:
-            entry["sink"].close()
+            with self.lock:
+                self.streams.pop(sid, None)
+            if ready:
+                entry["sink"].close()
 
     def _reader(self, sock):
         try:
@@ -252,21 +292,37 @@ class Mux:
                     with self.lock:
                         entry = self.streams.get(sid)
                     if entry:
-                        try:
-                            entry["sink"].feed(body)
-                        except OSError:
-                            self.send(sid, RESET)
-                            self._finish(sid, local=True, remote=True)
+                        with entry["lock"]:
+                            closed = entry["closed"]
+                        if not closed:
+                            try:
+                                entry["outq"].put_nowait(body)
+                            except queue.Full:
+                                self.send(sid, RESET)
+                                with self.lock:
+                                    self.streams.pop(sid, None)
+                                with entry["lock"]:
+                                    entry["closed"] = True
+                                entry["sink"].close()
                 elif kind == FIN:
                     with self.lock:
                         entry = self.streams.get(sid)
                     if entry:
-                        entry["sink"].shutdown_wr()
+                        try:
+                            entry["outq"].put_nowait(SHUTDOWN)
+                        except queue.Full:
+                            pass
                         self._finish(sid, remote=True)
                 elif kind == RESET:
                     with self.lock:
                         entry = self.streams.pop(sid, None)
                     if entry:
+                        with entry["lock"]:
+                            entry["closed"] = True
+                        try:
+                            entry["outq"].put_nowait(ABORT)
+                        except queue.Full:
+                            pass
                         entry["sink"].close()
         except (OSError, EOFError):
             pass

@@ -1,5 +1,6 @@
 import argparse
 import os
+import queue
 import socket
 import struct
 import subprocess
@@ -20,6 +21,9 @@ UsePAM no
 DATA, OPEN, FIN, RESET = 0, 1, 2, 3
 HDR = struct.Struct("!IB")
 PING_INTERVAL = 15
+QMAX = 128
+SHUTDOWN = object()
+ABORT = object()
 
 
 def start_sshd():
@@ -127,8 +131,8 @@ class Mux:
 
     def open(self, sid, port):
         entry = {
-            "sock": None, "queue": [], "cl_fin": False, "up_fin": False,
-            "lock": threading.Lock(), "closed": False,
+            "sock": None, "outq": queue.Queue(QMAX), "cl_fin": False, "up_fin": False,
+            "lock": threading.Lock(), "closed": False, "w_done": False,
         }
         with self.lock:
             self.streams[sid] = entry
@@ -149,23 +153,35 @@ class Mux:
                 self.streams.pop(sid, None)
             with entry["lock"]:
                 entry["closed"] = True
-                entry["queue"].clear()
             return
         with entry["lock"]:
             entry["sock"] = sock
-            pending = entry["queue"]
-            entry["queue"] = []
-            cl_fin = entry["cl_fin"]
+        threading.Thread(target=self._writer, args=(sid, entry, sock), daemon=True).start()
+        threading.Thread(target=self._pump, args=(sid, sock), daemon=True).start()
+
+    def _writer(self, sid, entry, sock):
+        outq = entry["outq"]
         try:
-            for chunk in pending:
-                sock.sendall(chunk)
-            if cl_fin:
-                sock.shutdown(socket.SHUT_WR)
+            while True:
+                item = outq.get()
+                if item is ABORT:
+                    return
+                if item is SHUTDOWN:
+                    try:
+                        sock.shutdown(socket.SHUT_WR)
+                    except OSError:
+                        pass
+                    return
+                sock.sendall(item)
         except OSError:
             self.send(sid, RESET)
             self._finish(sid, cl=True, up=True)
-            return
-        threading.Thread(target=self._pump, args=(sid, sock), daemon=True).start()
+        finally:
+            with entry["lock"]:
+                entry["w_done"] = True
+                ready = entry["closed"]
+            if ready:
+                close_socket(sock)
 
     def _pump(self, sid, sock):
         try:
@@ -188,29 +204,21 @@ class Mux:
         with entry["lock"]:
             if entry["closed"]:
                 return
-            if entry["sock"] is None:
-                entry["queue"].append(body)
-                return
-            sock = entry["sock"]
         try:
-            sock.sendall(body)
-        except OSError:
+            entry["outq"].put_nowait(body)
+        except queue.Full:
             self.send(sid, RESET)
-            self._finish(sid, cl=True, up=True)
+            self.reset(sid)
 
     def fin(self, sid):
         with self.lock:
             entry = self.streams.get(sid)
         if not entry:
             return
-        with entry["lock"]:
-            entry["cl_fin"] = True
-            sock = entry["sock"]
-        if sock is not None:
-            try:
-                sock.shutdown(socket.SHUT_WR)
-            except OSError:
-                pass
+        try:
+            entry["outq"].put_nowait(SHUTDOWN)
+        except queue.Full:
+            pass
         self._finish(sid, cl=True)
 
     def reset(self, sid):
@@ -219,8 +227,11 @@ class Mux:
         if entry:
             with entry["lock"]:
                 entry["closed"] = True
-                entry["queue"].clear()
                 sock = entry["sock"]
+            try:
+                entry["outq"].put_nowait(ABORT)
+            except queue.Full:
+                pass
             if sock:
                 close_socket(sock)
 
@@ -234,13 +245,13 @@ class Mux:
             entry["up_fin"] |= up
             done = entry["cl_fin"] and entry["up_fin"]
             sock = entry["sock"]
+            ready = entry["w_done"]
             if done:
                 entry["closed"] = True
-                entry["queue"].clear()
         if done:
             with self.lock:
                 self.streams.pop(sid, None)
-            if sock:
+            if ready and sock:
                 close_socket(sock)
 
     def run(self):
@@ -276,6 +287,10 @@ class Mux:
                 with entry["lock"]:
                     entry["closed"] = True
                     sock = entry["sock"]
+                try:
+                    entry["outq"].put_nowait(ABORT)
+                except queue.Full:
+                    pass
                 if sock:
                     close_socket(sock)
             ws.drain(self.conn)
