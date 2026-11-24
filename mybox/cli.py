@@ -7,6 +7,8 @@ import tempfile
 
 from . import __version__, boxes, serve, tunnel
 
+REPO = "git+https://github.com/Timeree/my-sandbox.git@main"
+
 
 def parse_forwards(items):
     out = []
@@ -61,6 +63,10 @@ def cmd_add(args):
     boxes.save(store)
     print(f"{name} -> {url}")
     return 0
+
+
+def cmd_update(args):
+    return subprocess.call([sys.executable, "-m", "pip", "install", "--upgrade", REPO])
 
 
 def cmd_ls(args):
@@ -152,6 +158,9 @@ def main(argv=None):
 
     p = sub.add_parser("ls", help="list boxes")
     p.set_defaults(func=cmd_ls)
+
+    p = sub.add_parser("update", help="upgrade mybox from the git repo")
+    p.set_defaults(func=cmd_update)
 
     args = parser.parse_args(argv)
     return args.func(args)

@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from . import wsproto
 
 SSHD_CONFIG = "/tmp/mybox-sshd_config"
-PATHS = {"/", "/my-sandbox", "/my-sandbox/"}
+PATHS = {"/my-sandbox"}
 
 DATA, OPEN, FIN, RESET = 0, 1, 2, 3
 HDR = struct.Struct("!IB")

@@ -11,13 +11,12 @@ PATH = "/my-sandbox"
 
 
 def normalize(url):
-    """Give bare urls a scheme and the /my-sandbox path marker."""
+    """Give bare urls a scheme and the exact /my-sandbox path marker."""
     if "://" not in url:
         url = "https://" + url
     parsed = urlparse(url)
-    if parsed.path in ("", "/"):
-        parsed = parsed._replace(path=PATH)
-    return urlunparse(parsed)
+    path = parsed.path.rstrip("/") or PATH
+    return urlunparse(parsed._replace(path=path))
 
 
 def load():

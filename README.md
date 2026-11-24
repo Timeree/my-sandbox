@@ -7,7 +7,13 @@
 ## 安装
 
 ```bash
-pip install .
+pip install git+https://github.com/Timeree/my-sandbox.git
+```
+
+升级到最新提交：
+
+```bash
+mybox update
 ```
 
 ## 服务端
@@ -21,7 +27,7 @@ mybox serve --port 3000
 | `--port` | `$PORT` 或 `3000` | HTTP/WebSocket 监听端口 |
 | `--ssh-port` | `$SSH_PORT` 或 `22` | SSH 端口，按需拉起 sshd |
 
-只接受 `/`、`/my-sandbox`、`/my-sandbox/` 三个路径的 WebSocket 升级，其余 404。根路径兼容旧链接。
+只接受 `/my-sandbox` 一个路径的 WebSocket 升级，其余 404。
 
 ## 客户端
 
@@ -60,7 +66,30 @@ mybox ssh prod --local-port 2222   # 固定本地 ssh 端口，默认随机
 | `--user` | 登录用户，默认 `$MYBOX_USER` 或 `root` |
 | `--password` | 登录密码，默认 `$MYBOX_PASS` 或 `myboxpass` |
 
-`-f` 是纯 TCP 转发，不带协议感知。需要 FTP 之类的多通道协议时，自己在两端封装。
+`-f` 是纯 TCP 转发，不带协议感知。
+
+### 在远端跑 FTP 时
+
+控制通道能转发，数据通道不行：FTP 的 `PASV` 响应里带的是**服务端自己的 IP 和随机端口**，本地客户端会去连自己的那个端口，没人监听。所以要么用 SFTP，要么把被动端口固定下来全部转发。
+
+推荐直接用 sshd 自带的 SFTP，一条连接就够：
+
+```bash
+mybox ssh prod -f 22:2222
+sftp -P 2222 root@127.0.0.1
+```
+
+非要用 FTP，就在远端把被动端口范围钉死、通告 IP 钉成 `127.0.0.1`，再把整段端口一起转发：
+
+```bash
+# 远端：pyftpdlib 绑定 127.0.0.1，被动端口 50000-50009
+python -m pyftpdlib -p 2121 -i 127.0.0.1 -r 50000-50009 -w -d /srv
+
+# 本地：控制 + 数据端口一一对应（本地端口必须和远端相同，因为 PASV 里写的就是它）
+mybox ssh prod -f 2121:35121,50000:50000,50001:50001,50002:50002,50003:50003,50004:50004,50005:50005,50006:50006,50007:50007,50008:50008,50009:50009
+```
+
+坑在于本地这些端口会被占住，且 FTP 服务端必须支持固定被动端口；proftpd 用 `PassivePorts`，vsftpd 用 `pasv_min_port`/`pasv_max_port` 配 `pasv_address=127.0.0.1`。
 
 ### `mybox ls`
 
@@ -68,6 +97,17 @@ mybox ssh prod --local-port 2222   # 固定本地 ssh 端口，默认随机
 box1  https://host/my-sandbox?sharecode=XXX
 prod  https://other/my-sandbox?sharecode=YYY
 ```
+
+### `mybox update`
+
+从仓库拉最新提交并覆盖安装：
+
+```bash
+mybox update
+# 等价于 python -m pip install --upgrade git+https://github.com/Timeree/my-sandbox.git@main
+```
+
+用的是当前解释器的 pip，装进 `mybox` 自身所在的环境。
 
 ## 技术细节
 
@@ -83,3 +123,4 @@ prod  https://other/my-sandbox?sharecode=YYY
 - 依赖 WebSocket 升级，反向代理需放行 `Upgrade`。
 - 服务端进程需常驻；宿主休眠或重启后需重新拉起。
 - 只转发 TCP，不处理 UDP。
+- 多通道协议（FTP、SIP 等）的数据连接需要固定端口并逐个转发，见上文。
