@@ -173,14 +173,34 @@ class Mux:
         self.next_id = 0
         self.ready = threading.Event()
         self.stopped = False
+        self.listeners = []
+        self.listeners_lock = threading.Lock()
         threading.Thread(target=self._supervise, daemon=True).start()
         threading.Thread(target=self._keepalive, daemon=True).start()
+
+    def track(self, listener):
+        with self.listeners_lock:
+            self.listeners.append(listener)
 
     def stop(self):
         self.stopped = True
         sock = self.sock
         if sock is not None:
             close_socket(sock)
+        with self.listeners_lock:
+            listeners = self.listeners[:]
+            self.listeners.clear()
+        for listener in listeners:
+            close_socket(listener)
+        with self.lock:
+            entries = list(self.streams.values())
+            self.streams.clear()
+        for entry in entries:
+            try:
+                entry["outq"].put_nowait(ABORT)
+            except queue.Full:
+                pass
+            entry["sink"].close()
 
     def _supervise(self):
         while not self.stopped:
@@ -363,6 +383,7 @@ def data_lane(mux, remote):
     listener.listen(1)
     listener.settimeout(DATA_TIMEOUT)
     port = listener.getsockname()[1]
+    mux.track(listener)
 
     def run():
         try:
@@ -373,7 +394,10 @@ def data_lane(mux, remote):
         except OSError:
             pass
         finally:
-            listener.close()
+            close_socket(listener)
+            with mux.listeners_lock:
+                if listener in mux.listeners:
+                    mux.listeners.remove(listener)
 
     threading.Thread(target=run, daemon=True).start()
     return port
@@ -401,7 +425,6 @@ class Tunnel:
     def __init__(self, url):
         host, port, path, tls = parse(url)
         self.mux = Mux(lambda: wsproto.connect(host, port, path, tls))
-        self.listeners = []
 
     def wait_ready(self, timeout=15):
         return self.mux.ready.wait(timeout)
@@ -430,14 +453,9 @@ class Tunnel:
                 else:
                     self.mux.attach(remote, Sink(conn))
 
-        self.listeners.append(listener)
+        self.mux.track(listener)
         threading.Thread(target=accept, daemon=True).start()
         return actual
 
     def close(self):
         self.mux.stop()
-        for listener in self.listeners:
-            try:
-                listener.close()
-            except OSError:
-                pass
