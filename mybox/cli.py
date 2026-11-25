@@ -5,7 +5,7 @@ import subprocess
 import sys
 import tempfile
 
-from . import __version__, boxes, serve, tunnel
+from . import __version__, boxes, guard, serve, tunnel
 
 REPO = "git+https://github.com/Timeree/my-sandbox.git@main"
 
@@ -108,6 +108,14 @@ def cmd_ls(args):
     width = max(len(name) for name in store)
     for name, item in store.items():
         print(f"{name.ljust(width)}  {item['url']}")
+    return 0
+
+
+def cmd_guard(args):
+    try:
+        guard.run(args)
+    except KeyboardInterrupt:
+        pass
     return 0
 
 
@@ -216,6 +224,22 @@ def main(argv=None):
 
     p = sub.add_parser("update", help="upgrade mybox from the git repo")
     p.set_defaults(func=cmd_update)
+
+    p = sub.add_parser("guard", help="watch memory/connections, dump state on trouble",
+                       formatter_class=argparse.RawDescriptionHelpFormatter,
+                       epilog=(
+                           "dump goes to ~/.config/mybox/guard.log (or $MYBOX_GUARD_LOG).\n"
+                           "  mybox guard\n"
+                           "  mybox guard --interval 2 --high 70\n"
+                           "  mybox guard --kill codebuddy-code   # only names you pick, x3 strikes\n"
+                       ))
+    p.add_argument("--interval", type=int, default=3, help="sample interval in seconds")
+    p.add_argument("--high", type=float, default=85.0, help="memory percent that triggers a dump")
+    p.add_argument("--strikes", type=int, default=3, help="consecutive high samples before killing")
+    p.add_argument("--keep", type=int, default=40, help="frames of state kept in the dump")
+    p.add_argument("--cooldown", type=int, default=60, help="min seconds between two dumps")
+    p.add_argument("--kill", metavar="NAME", help="kill matching processes after strikes (off by default)")
+    p.set_defaults(func=cmd_guard)
 
     args = parser.parse_args(argv)
     args.extra = extra
