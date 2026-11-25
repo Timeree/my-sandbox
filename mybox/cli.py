@@ -231,14 +231,14 @@ def main(argv=None):
                            "dump goes to ~/.config/mybox/guard.log (or $MYBOX_GUARD_LOG).\n"
                            "  mybox guard\n"
                            "  mybox guard --interval 2 --high 70\n"
-                           "  mybox guard --kill codebuddy-code   # only names you pick, x3 strikes\n"
+                           "  mybox guard --kill-at 7500   # kill biggest user proc above 7500M\n"
                        ))
     p.add_argument("--interval", type=int, default=3, help="sample interval in seconds")
     p.add_argument("--high", type=float, default=85.0, help="memory percent that triggers a dump")
-    p.add_argument("--strikes", type=int, default=3, help="consecutive high samples before killing")
+    p.add_argument("--critical", type=float, default=97.0, help="memory percent that dumps immediately")
     p.add_argument("--keep", type=int, default=40, help="frames of state kept in the dump")
-    p.add_argument("--cooldown", type=int, default=60, help="min seconds between two dumps")
-    p.add_argument("--kill", metavar="NAME", help="kill matching processes after strikes (off by default)")
+    p.add_argument("--cooldown", type=int, default=60, help="min seconds between two dumps or kills")
+    p.add_argument("--kill-at", type=int, metavar="MB", help="kill the biggest user process above this RSS total (off by default)")
     p.set_defaults(func=cmd_guard)
 
     args = parser.parse_args(argv)

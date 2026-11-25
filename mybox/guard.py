@@ -1,4 +1,4 @@
-"""采样内存/连接/进程，异常时落盘现场，可选按名字精确清理。"""
+"""采样内存/连接/进程，异常时落盘现场，超阈值杀最大的用户进程。"""
 import os
 import signal
 import subprocess
@@ -8,7 +8,12 @@ from pathlib import Path
 
 LOG = Path(os.environ.get("MYBOX_GUARD_LOG") or Path.home() / ".config" / "mybox" / "guard.log")
 CG = Path("/sys/fs/cgroup")
-HARD = ("docker-init", "supervisord", "sandbox-proxy", "editor_sdk", "sshd", "mybox")
+HARD = (
+    "docker-init", "supervisord", "sshd", "mybox",
+    "sandbox", "editor_sdk", "codebuddy", "workbuddy",
+    ".PlnPyKFp4CRfFtgC1", "PM2", "dockerd", "containerd",
+    "sync_server", "envd", "log-forward",
+)
 
 
 def read(path):
@@ -77,53 +82,72 @@ def dump(ring, reason):
         f.write("\n".join(block) + "\n\n")
 
 
-def kill_named(name):
-    """只杀命令行里含 name 且不在 HARD 白名单里的进程。"""
-    killed = []
-    for line in shell("ps -eo pid=,args=").splitlines():
+def biggest_user():
+    """RSS 最大、且命令行不含 HARD 任一关键词、PID>1 的进程。"""
+    best = None
+    for line in shell("ps -eo pid=,rss=,args=").splitlines():
         line = line.strip()
-        if not line or name not in line:
+        if not line:
             continue
-        pid, _, args = line.partition(" ")
-        if any(h in args for h in HARD) or int(pid) <= 1:
+        parts = line.split(None, 2)
+        if len(parts) != 3:
             continue
-        try:
-            os.kill(int(pid), signal.SIGTERM)
-            killed.append(f"{pid}:{args[:70]}")
-        except (OSError, ValueError):
-            pass
-    return killed
+        pid, rss, args = parts
+        if not pid.isdigit() or not rss.isdigit() or int(pid) <= 1:
+            continue
+        if any(h in args for h in HARD):
+            continue
+        if best is None or int(rss) > best[1]:
+            best = (int(pid), int(rss), args)
+    return best
+
+
+def kill_biggest():
+    best = biggest_user()
+    if not best:
+        return None
+    pid, rss, args = best
+    try:
+        os.kill(pid, signal.SIGTERM)
+        return f"{pid}:{rss // 1024}M:{args[:60]}"
+    except OSError:
+        return None
 
 
 def run(args):
     LOG.parent.mkdir(parents=True, exist_ok=True)
     ring = deque(maxlen=args.keep)
-    over = 0
     last_oom = None
     last_dump = 0
-    print(f"mybox guard: log {LOG}, every {args.interval}s, "
-          f"kill={'off' if not args.kill else args.kill}", flush=True)
+    last_kill = 0
+    cutoff = args.kill_at * 1048576 if args.kill_at else None
+    status = f"kill biggest user proc above {args.kill_at}M" if args.kill_at else "kill off"
+    print(f"mybox guard: log {LOG}, every {args.interval}s, {status}", flush=True)
     while True:
         s = sample()
         ring.append(s)
         LOG.open("a").write(render(s) + "\n")
         cause = []
+        urgent = False
         if s["dstate"]:
             cause.append(f"D-state x{len(s['dstate'])}")
+            urgent = True
         if last_oom is not None and int(s["oom_kill"]) > int(last_oom):
             cause.append("oom_kill increased")
+            urgent = True
+        if s["pct"] >= args.critical:
+            cause.append(f"mem>={args.critical}% CRITICAL")
+            urgent = True
         if s["pct"] >= args.high:
-            over += 1
-            cause.append(f"mem>={args.high}% x{over}")
-        else:
-            over = 0
+            cause.append(f"mem>={args.high}%")
         last_oom = s["oom_kill"]
-        if cause and time.time() - last_dump >= args.cooldown:
+        if cause and (urgent or time.time() - last_dump >= args.cooldown):
             dump(ring, ", ".join(cause))
             last_dump = time.time()
-        if args.kill and over >= args.strikes:
-            killed = kill_named(args.kill)
+        if cutoff and s["cur"] >= cutoff and time.time() - last_kill >= args.cooldown:
+            killed = kill_biggest()
             if killed:
-                LOG.open("a").write(f"killed: {', '.join(killed)}\n")
-            over = 0
+                LOG.open("a").write(f"kill@{s['cur'] // 1048576}M -> {killed}\n")
+                dump(ring, f"killed biggest user proc: {killed}")
+            last_kill = time.time()
         time.sleep(args.interval)

@@ -143,13 +143,13 @@ mybox guard --interval 2 --high 70   # 更密、更敏感
 
 日志默认 `~/.config/mybox/guard.log`，可用 `MYBOX_GUARD_LOG` 改路径。触发信号有三类：进程进入 D 状态（不可中断 IO，真卡死）、`oom_kill` 计数增加、内存持续高于 `--high`。同类落盘之间有 `--cooldown`（默认 60s）冷却，不会刷屏。
 
-**默认只记录，不杀任何进程。** 容器里 `/proc/sys/vm/drop_caches` 无写权限、也没有 swap，所以不存在安全的"清缓存"手段；内存里最吃钱的又正好是 WorkBuddy/codebuddy 自己的会话进程，误杀等于掐断服务。只有你显式给出进程名才启用清理，且连续 `--strikes`（默认 3）次高位才动手：
+**默认只记录，不杀进程。** 容器里 `/proc/sys/vm/drop_caches` 无写权限、也没有 swap，不存在安全的"清缓存"手段。给出 `--kill-at` 后启用自动清理：内存用量（绝对值 MB）超过该阈值时，杀掉当前 RSS 最大、**且不在白名单**的用户进程，杀前先落盘现场，两次清理之间隔 `--cooldown`（默认 60s）。
 
 ```bash
-mybox guard --kill my-heavy-app      # 只杀命令行里含 my-heavy-app 的进程
+mybox guard --kill-at 7500          # 超过 7500M 杀掉最吃内存的用户进程
 ```
 
-命中规则严格：`docker-init / supervisord / sandbox-proxy / editor_sdk / sshd / mybox` 在硬白名单里，无论怎么匹配都不会被杀；PID 1 也免疫。`--kill` 是进程名子串匹配，务必用足够独特的名字，别用 `node` 这种会命中一堆的通用词。
+白名单覆盖平台和会话基础设施：`docker-init / supervisord / sandbox / editor_sdk / sshd / mybox / codebuddy / workbuddy / .PlnPyKFp4CRfFtgC1 / PM2 / dockerd / containerd / sync_server / envd / log-forward`，命令行含这些关键词的进程一律跳过，PID 1 也免疫。也就是说只会杀掉你自己起的编译、脚本等任务（比如吃满内存的 Gradle/Kotlin）。**别把阈值设得太低**，否则在只剩小进程时会误杀 shell 之类。
 
 ## 技术细节
 
