@@ -5,7 +5,7 @@ import subprocess
 import sys
 import tempfile
 
-from . import __version__, boxes, guard, serve, tunnel
+from . import __version__, boxes, serve, tunnel
 
 REPO = "git+https://github.com/Timeree/my-sandbox.git@main"
 
@@ -111,11 +111,16 @@ def cmd_ls(args):
     return 0
 
 
-def cmd_guard(args):
-    try:
-        guard.run(args)
-    except KeyboardInterrupt:
-        pass
+def cmd_remove(args):
+    store = boxes.load()
+    name = args.name or next(iter(store), None)
+    if name is None:
+        sys.exit("no box yet: mybox add <url>")
+    if name not in store:
+        sys.exit(f"no such box: {name}")
+    url = store.pop(name)["url"]
+    boxes.save(store)
+    print(f"removed {name}  {url}")
     return 0
 
 
@@ -222,24 +227,12 @@ def main(argv=None):
     p = sub.add_parser("ls", help="list boxes")
     p.set_defaults(func=cmd_ls)
 
+    p = sub.add_parser("remove", help="remove a remembered box")
+    p.add_argument("name", nargs="?", help="box name, defaults to the first one")
+    p.set_defaults(func=cmd_remove)
+
     p = sub.add_parser("update", help="upgrade mybox from the git repo")
     p.set_defaults(func=cmd_update)
-
-    p = sub.add_parser("guard", help="watch memory/connections, dump state on trouble",
-                       formatter_class=argparse.RawDescriptionHelpFormatter,
-                       epilog=(
-                           "dump goes to ~/.config/mybox/guard.log (or $MYBOX_GUARD_LOG).\n"
-                           "  mybox guard\n"
-                           "  mybox guard --interval 2 --high 70\n"
-                           "  mybox guard --kill-at 7500   # kill biggest user proc above 7500M\n"
-                       ))
-    p.add_argument("--interval", type=int, default=3, help="sample interval in seconds")
-    p.add_argument("--high", type=float, default=85.0, help="memory percent that triggers a dump")
-    p.add_argument("--critical", type=float, default=97.0, help="memory percent that dumps immediately")
-    p.add_argument("--keep", type=int, default=40, help="frames of state kept in the dump")
-    p.add_argument("--cooldown", type=int, default=60, help="min seconds between two dumps or kills")
-    p.add_argument("--kill-at", type=int, metavar="MB", help="kill the biggest user process above this RSS total (off by default)")
-    p.set_defaults(func=cmd_guard)
 
     args = parser.parse_args(argv)
     args.extra = extra

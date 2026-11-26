@@ -123,6 +123,15 @@ box1  https://host/my-sandbox?sharecode=XXX
 prod  https://other/my-sandbox?sharecode=YYY
 ```
 
+### `mybox remove [name]`
+
+从记录表里移除一条 box，只删本地记录，不影响远端服务。name 省略时取第一条：
+
+```bash
+mybox remove prod
+mybox remove        # 删第一条
+```
+
 ### `mybox update`
 
 从仓库拉最新提交并覆盖安装：
@@ -133,25 +142,6 @@ mybox update
 ```
 
 `--force-reinstall` 保证覆盖安装，不会因为版本号相同被 pip 跳过。用当前解释器的 pip，装进 `mybox` 自身所在的环境。
-
-### `mybox guard`
-
-卡死的现场保留：常驻采样内存、连接数、D 状态进程和 `oom_kill` 事件，平时只写一行状态到日志；一旦检测到异常信号，把最近 N 帧现场 + 当前 RSS 进程表整块落到日志，事后可以回放卡死前发生了什么。
-
-```bash
-mybox guard                          # 每 3s 采样，内存 >=85% 触发落盘
-mybox guard --interval 2 --high 70   # 更密、更敏感
-```
-
-日志默认 `~/.config/mybox/guard.log`，可用 `MYBOX_GUARD_LOG` 改路径。触发信号有三类：进程进入 D 状态（不可中断 IO，真卡死）、`oom_kill` 计数增加、内存持续高于 `--high`。同类落盘之间有 `--cooldown`（默认 60s）冷却，不会刷屏。
-
-**默认只记录，不杀进程。** 容器里 `/proc/sys/vm/drop_caches` 无写权限、也没有 swap，不存在安全的"清缓存"手段。给出 `--kill-at` 后启用自动清理：内存用量（绝对值 MB）超过该阈值时，杀掉当前 RSS 最大、**且不在白名单**的用户进程，杀前先落盘现场，两次清理之间隔 `--cooldown`（默认 60s）。
-
-```bash
-mybox guard --kill-at 7500          # 超过 7500M 杀掉最吃内存的用户进程
-```
-
-白名单覆盖平台和会话基础设施：`docker-init / supervisord / sandbox / editor_sdk / sshd / mybox / codebuddy / workbuddy / .PlnPyKFp4CRfFtgC1 / PM2 / dockerd / containerd / sync_server / envd / log-forward`，命令行含这些关键词的进程一律跳过，PID 1 也免疫。也就是说只会杀掉你自己起的编译、脚本等任务（比如吃满内存的 Gradle/Kotlin）。**别把阈值设得太低**，否则在只剩小进程时会误杀 shell 之类。
 
 ## 技术细节
 
