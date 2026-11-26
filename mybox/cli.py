@@ -1,6 +1,7 @@
 import argparse
 import base64
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -124,6 +125,25 @@ def cmd_remove(args):
     return 0
 
 
+def log(*parts):
+    print(f"[mybox] {' '.join(str(p) for p in parts)}", file=sys.stderr, flush=True)
+
+
+def probe_ssh(port, timeout=10):
+    """Read the SSH banner through the tunnel; return (ok, detail)."""
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=timeout) as sock:
+            sock.settimeout(timeout)
+            banner = sock.recv(256)
+    except (OSError, socket.timeout) as exc:
+        return False, str(exc) or type(exc).__name__
+    if not banner:
+        return False, "connection closed before SSH banner"
+    if not banner.startswith(b"SSH-"):
+        return False, f"unexpected banner: {banner[:60]!r}"
+    return True, banner.decode(errors="replace").strip()
+
+
 def cmd_ssh(args):
     store = boxes.load()
     name = args.name or next(iter(store), None)
@@ -139,10 +159,13 @@ def cmd_ssh(args):
     if args.ftp is not None:
         forwards.append((2121, args.ftp, True))
 
-    box = tunnel.Tunnel(store[name]["url"])
+    url = store[name]["url"]
+    log(f"connecting to {name}: {url}")
+    box = tunnel.Tunnel(url)
     if not box.wait_ready(20):
         box.close()
-        sys.exit(f"cannot reach {name}: {store[name]['url']}")
+        sys.exit(f"cannot reach {name}: {url}")
+    log("tunnel ready")
 
     ssh_port = box.forward(args.remote_port, args.local_port)
     for remote, local, ftp in forwards:
@@ -151,6 +174,14 @@ def cmd_ssh(args):
         except OSError as exc:
             box.close()
             sys.exit(f"cannot listen on 127.0.0.1:{local}: {exc}")
+    log(f"listening: ssh 127.0.0.1:{ssh_port}" +
+        ("".join(f", ftp {local}" for _, local, ftp in forwards if ftp) or ""))
+
+    ok, detail = probe_ssh(ssh_port)
+    if not ok:
+        box.close()
+        sys.exit(f"sshd on the box did not answer (remote port {args.remote_port}): {detail}")
+    log(f"sshd ok: {detail}")
 
     script = askpass(args.password)
     env = dict(

@@ -82,6 +82,17 @@ mybox ssh prod -- -f -L 9090:localhost:80         # ssh 自己的 -f，后台运
 
 ssh 会话结束时，所有由它拉起的本地监听端口会一起关闭——包括 `--ftp`、`-f` 的转发端口、FTP 被动模式临时开的数据端口，以及本地 ssh 端口。不需要手动清理。
 
+连接过程会在 stderr 打日志，每步一行，方便定位卡在哪：
+
+```
+[mybox] connecting to prod: wss://host/my-sandbox?sharecode=XXX
+[mybox] tunnel ready
+[mybox] listening: ssh 127.0.0.1:41235, ftp 35121
+[mybox] sshd ok: SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.20
+```
+
+启动 ssh 前会先读一次远端 SSH banner。如果隧道通了但远端 sshd 没起，会直接报 `sshd on the box did not answer (remote port 22): connection closed before SSH banner`，不会让你对着空窗口猜。日志走 stderr，不污染 shell 输出。
+
 | 参数 | 说明 |
 |---|---|
 | `-f/--forward REMOTE:LOCAL` | 远端端口 → 本地端口，逗号分隔或重复给出；`ftp:REMOTE:LOCAL` 强制按 FTP 处理 |
