@@ -44,6 +44,7 @@ mybox serve --port 3000
 mybox add https://host/my-sandbox?sharecode=XXX     # name 自动生成 box1、box2...
 mybox add prod https://host/my-sandbox?sharecode=XXX
 mybox ls
+mybox rename prod production
 mybox ssh prod
 ```
 
@@ -142,6 +143,17 @@ prod  https://other/my-sandbox?sharecode=YYY
 mybox remove prod
 mybox remove        # 删第一条
 ```
+
+### `mybox rename [old] new`
+
+给记录改名，只改本地 key，url 不变。省略 old 时取第一条：
+
+```bash
+mybox rename prod production
+mybox rename production   # 第一条改名为 production
+```
+
+新名已存在会拒绝，避免覆盖记录。
 
 ### `mybox update`
 

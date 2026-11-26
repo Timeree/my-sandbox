@@ -125,6 +125,29 @@ def cmd_remove(args):
     return 0
 
 
+def cmd_rename(args):
+    if len(args.items) == 1:
+        old, new = None, args.items[0]
+    elif len(args.items) == 2:
+        old, new = args.items
+    else:
+        sys.exit("usage: mybox rename [old] new")
+
+    store = boxes.load()
+    old = old or next(iter(store), None)
+    if old is None:
+        sys.exit("no box yet: mybox add <url>")
+    if old not in store:
+        sys.exit(f"no such box: {old}")
+    if new in store:
+        sys.exit(f"box already exists: {new}")
+    url = store[old]["url"]
+    store = {new if k == old else k: v for k, v in store.items()}
+    boxes.save(store)
+    print(f"{old} -> {new}  {url}")
+    return 0
+
+
 def log(*parts):
     print(f"[mybox] {' '.join(str(p) for p in parts)}", file=sys.stderr, flush=True)
 
@@ -261,6 +284,10 @@ def main(argv=None):
     p = sub.add_parser("remove", help="remove a remembered box")
     p.add_argument("name", nargs="?", help="box name, defaults to the first one")
     p.set_defaults(func=cmd_remove)
+
+    p = sub.add_parser("rename", help="rename a remembered box")
+    p.add_argument("items", nargs="+", metavar="[old] new")
+    p.set_defaults(func=cmd_rename)
 
     p = sub.add_parser("update", help="upgrade mybox from the git repo")
     p.set_defaults(func=cmd_update)
