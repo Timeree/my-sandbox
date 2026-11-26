@@ -252,6 +252,19 @@ class Mux:
         except (OSError, EOFError):
             pass
 
+    @staticmethod
+    def _enqueue(entry, item):
+        # 队列满时背压等待而非 RESET，否则突发输出会误断流；关闭时及时退出避免死等
+        while True:
+            with entry["lock"]:
+                if entry["closed"]:
+                    return False
+            try:
+                entry["outq"].put(item, timeout=0.5)
+                return True
+            except queue.Full:
+                continue
+
     def attach(self, remote, sink):
         if not self.ready.wait(15):
             sink.close()
@@ -338,26 +351,12 @@ class Mux:
                     with self.lock:
                         entry = self.streams.get(sid)
                     if entry:
-                        with entry["lock"]:
-                            closed = entry["closed"]
-                        if not closed:
-                            try:
-                                entry["outq"].put_nowait(body)
-                            except queue.Full:
-                                self.send(sid, RESET)
-                                with self.lock:
-                                    self.streams.pop(sid, None)
-                                with entry["lock"]:
-                                    entry["closed"] = True
-                                entry["sink"].close()
+                        self._enqueue(entry, body)
                 elif kind == FIN:
                     with self.lock:
                         entry = self.streams.get(sid)
                     if entry:
-                        try:
-                            entry["outq"].put_nowait(SHUTDOWN)
-                        except queue.Full:
-                            pass
+                        self._enqueue(entry, SHUTDOWN)
                         self._finish(sid, remote=True)
                 elif kind == RESET:
                     with self.lock:

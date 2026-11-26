@@ -183,24 +183,31 @@ class Mux:
             entry = self.streams.get(sid)
         if not entry:
             return
-        with entry["lock"]:
-            if entry["closed"]:
+        # 队列满时背压等待而非 RESET，避免突发上传误断流
+        while True:
+            with entry["lock"]:
+                if entry["closed"]:
+                    return
+            try:
+                entry["outq"].put(body, timeout=0.5)
                 return
-        try:
-            entry["outq"].put_nowait(body)
-        except queue.Full:
-            self.send(sid, RESET)
-            self.reset(sid)
+            except queue.Full:
+                continue
 
     def fin(self, sid):
         with self.lock:
             entry = self.streams.get(sid)
         if not entry:
             return
-        try:
-            entry["outq"].put_nowait(SHUTDOWN)
-        except queue.Full:
-            pass
+        while True:
+            with entry["lock"]:
+                if entry["closed"]:
+                    return
+            try:
+                entry["outq"].put(SHUTDOWN, timeout=0.5)
+                break
+            except queue.Full:
+                continue
         self._finish(sid, cl=True)
 
     def reset(self, sid):
