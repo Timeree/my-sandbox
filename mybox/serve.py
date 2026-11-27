@@ -365,9 +365,23 @@ class Handler(BaseHTTPRequestHandler):
     def _proxy(self):
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query, keep_blank_values=True)
-        port = query.get("port", [self._cookie("mybox_port")])[0]
+        rel = (parsed.path[len(PROXY_PREFIX):]
+               if parsed.path.startswith(PROXY_PREFIX) else "")
+
+        port = None
+        base = parsed.path
+        if rel.startswith("/"):
+            head, sep, tail = rel[1:].partition("/")
+            if head:
+                if not head.isdigit():
+                    self.send_error(400, "bad port")
+                    return
+                port = head
+                base = "/" + tail if sep else "/"
         if port is None:
-            self.send_error(404, "missing port parameter")
+            port = self._cookie("mybox_port")
+        if not port:
+            self.send_error(404, "missing port path")
             return
         if not check_password(self.path, self.server.password):
             self.send_error(401)
@@ -381,9 +395,6 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(400, "bad port")
             return
 
-        base = parsed.path
-        if base.startswith(PROXY_PREFIX):
-            base = base[len(PROXY_PREFIX):] or "/"
         forward = {k: v for k, v in query.items() if k not in CONTROL_PARAMS}
         target = base + ("?" + urlencode(forward, doseq=True) if forward else "")
 
