@@ -41,16 +41,16 @@ mybox serve -p ABCD1234     # 指定密码
 
 ### 握手密码 `-p`
 
-这是网关 sharecode 之外、由服务端自己把关的一层校验，只在服务端开启：
+这是入口 URL 自带的鉴权之外、由服务端自己把关的一层校验，只在服务端开启：
 
 - 不带 `-p`：不校验，行为同旧版。
 - `mybox serve -p`：启动时生成一个 8 位 base32 随机密码（如 `S4FBA7WS`），打印在启动信息里。
 - `mybox serve -p ABCD1234`：用指定密码。
 
-开启后，客户端的 GET 请求必须带 `p=<密码>`，否则服务端返回 401、握手不通过。把密码作为 URL 的 query 参数即可，它和 sharecode 一样会原样进入握手请求：
+开启后，客户端的 GET 请求必须带 `p=<密码>`，否则服务端返回 401、握手不通过。把密码作为 URL 的 query 参数即可，它会原样进入握手请求：
 
 ```bash
-mybox add "https://host/my-sandbox?sharecode=XXX&p=ABCD1234"
+mybox add "https://host/my-sandbox?token=XXX&p=ABCD1234"
 ```
 
 `add` 的连通探测和 `ssh` 都会自动携带这个 `p`。密码等同凭据，别和 URL 一起外泄。
@@ -60,24 +60,24 @@ mybox add "https://host/my-sandbox?sharecode=XXX&p=ABCD1234"
 给网址加 `port=<端口>`，服务端收到普通 HTTP 请求时不再走沙箱隧道，而是直接反向代理到沙箱内的 `127.0.0.1:<端口>`。沙箱里跑的 Web 服务（Gradio、Jupyter、静态站等）可以就这么从浏览器直接打开，不必先 `mybox ssh -f`：
 
 ```
-https://host/my-sandbox?sharecode=XXX&port=8080
+https://host/my-sandbox?token=XXX&port=8080
 ```
 
 - 路径 `/my-sandbox` 前缀会被去掉：`/my-sandbox/api?port=8080` → 后端 `/api`。
-- `port`、`p`、`sharecode` 是控制参数，不会转给后端；其余 query 原样转发。
+- `port`、`p` 是控制参数，不会转给后端；其余 query 原样转发。
 - 支持 GET/POST/PUT/DELETE/PATCH/HEAD/OPTIONS，请求体和响应原样透传。
 - 首次带 `port` 的响应会种一个 `mybox_port` cookie，之后不带 `port` 的相对路径请求（如页面里的 `/app.js`）也按同一端口代理，页面里用绝对路径的链接才能正常工作。cookie 一天有效。
 - WebSocket 升级请求（`mybox ssh` 等）带 `port` 也不受影响，仍走隧道。
 - 服务端开了 `-p` 时这个代理同样校验 `p`（首次带上即可，之后靠 cookie）。
-- 后端连不上返回 502。这个代理能访问沙箱内任意本地端口，鉴权只靠网关 sharecode 和服务端 `-p`，**同样不要裸奔公网**。
+- 后端连不上返回 502。这个代理能访问沙箱内任意本地端口，鉴权只靠入口 URL 自带的鉴权和服务端 `-p`，**同样不要裸奔公网**。
 
 `mybox serve` 起来就会在 `--ftp-port` 上常驻一个 **无用户名密码、全权限、根目录 `/`** 的 FTP 服务。客户端连不连由自己决定，不连它也不占隧道。因为无认证又能读写整个文件系统，**不要把这个端口直接暴露在公网**，只通过 SSH 隧道访问。
 
 ## 客户端
 
 ```bash
-mybox add https://host/my-sandbox?sharecode=XXX     # name 自动生成 box1、box2...
-mybox add prod https://host/my-sandbox?sharecode=XXX
+mybox add https://host/my-sandbox?token=XXX     # name 自动生成 box1、box2...
+mybox add prod https://host/my-sandbox?token=XXX
 mybox ls
 mybox rename prod production
 mybox ssh prod
@@ -89,7 +89,7 @@ mybox ssh prod
 
 省略路径或只给 `/` 时自动补成 `/my-sandbox`，保持链接可读。
 
-配置存在 `~/.config/mybox/boxes.json`（权限 600，url 里的 sharecode 等同凭据）。可用 `MYBOX_CONFIG_DIR` 改目录。
+配置存在 `~/.config/mybox/boxes.json`（权限 600，url 里的鉴权参数等同凭据）。可用 `MYBOX_CONFIG_DIR` 改目录。
 
 ### `mybox ssh [name]`
 
@@ -132,7 +132,7 @@ mybox ssh prod --local-port 2222 --ftp 35121 --kill-stale
 连接过程会在 stderr 打日志，每步一行，方便定位卡在哪：
 
 ```
-[mybox] connecting to prod: wss://host/my-sandbox?sharecode=XXX
+[mybox] connecting to prod: wss://host/my-sandbox?token=XXX
 [mybox] tunnel ready
 [mybox] listening: ssh 127.0.0.1:41235, ftp 35121
 [mybox] sshd ok: SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.20
@@ -177,8 +177,8 @@ mybox ssh prod -f ftp:3121:13121
 ### `mybox ls`
 
 ```
-box1  https://host/my-sandbox?sharecode=XXX
-prod  https://other/my-sandbox?sharecode=YYY
+box1  https://host/my-sandbox?token=XXX
+prod  https://other/my-sandbox?token=YYY
 ```
 
 ### `mybox remove [name]`
@@ -220,7 +220,7 @@ mybox update
 - 服务端对 `--ssh-port` 做健康探测，缺失时拉起 sshd，轮询等待就绪后建连。
 - 两端 `TCP_NODELAY` 加内核 `SO_KEEPALIVE`，关掉 Nagle 与延迟 ACK 叠加出的 40ms 固定停顿。
 - FTP 省往返：FTP 的慢主要来自每条命令一次的跨网关 RTT（本地吞吐 200MB/s，但 RTT 50ms 时掉到个位数 MB/s）。为此把能省的命令尽量留在本地或合并：
-  - `USER/PASS/SYST/FEAT/OPTS/TYPE/NOOP` 等回复固定的命令由客户端本地应答，不走隧道；鉴权仍在 WebSocket 握手的 `sharecode`/`-p` 层，不受影响。
+  - `USER/PASS/SYST/FEAT/OPTS/TYPE/NOOP` 等回复固定的命令由客户端本地应答，不走隧道；鉴权仍在入口 URL 和 WebSocket 握手的 `-p` 层，不受影响。
   - 转发 `MLSD/LIST/NLST/RETR/STOR` 时在同一帧里补一条 `PASV`，下一轮 `PASV` 直接命中缓存，省掉一个 RTT。
   - 服务端内置 FTP 支持 `MLSD`（FileZilla 等现代客户端优先用它列目录），避免 `502` 回退到 `LIST` 多花往返。
 - 15 秒 WebSocket ping 双向保活，断线自动重连。
