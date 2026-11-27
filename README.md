@@ -203,7 +203,10 @@ mybox update
 - 半关闭而非硬断：一侧 `shutdown(SHUT_WR)` 转成 FIN 帧，两个方向都 FIN 且写线程排空后才关闭 socket，避免发送缓冲区里的数据被丢弃。
 - 服务端对 `--ssh-port` 做健康探测，缺失时拉起 sshd，轮询等待就绪后建连。
 - 两端 `TCP_NODELAY` 加内核 `SO_KEEPALIVE`，关掉 Nagle 与延迟 ACK 叠加出的 40ms 固定停顿。
-- FTP 预取：转发 `LIST/NLST/RETR/STOR` 时在同一帧里补一条 `PASV`，下一轮 `PASV` 直接命中缓存，省掉一个 RTT。
+- FTP 省往返：FTP 的慢主要来自每条命令一次的跨网关 RTT（本地吞吐 200MB/s，但 RTT 50ms 时掉到个位数 MB/s）。为此把能省的命令尽量留在本地或合并：
+  - `USER/PASS/SYST/FEAT/OPTS/TYPE/NOOP` 等回复固定的命令由客户端本地应答，不走隧道；鉴权仍在 WebSocket 握手的 `sharecode`/`-p` 层，不受影响。
+  - 转发 `MLSD/LIST/NLST/RETR/STOR` 时在同一帧里补一条 `PASV`，下一轮 `PASV` 直接命中缓存，省掉一个 RTT。
+  - 服务端内置 FTP 支持 `MLSD`（FileZilla 等现代客户端优先用它列目录），避免 `502` 回退到 `LIST` 多花往返。
 - 15 秒 WebSocket ping 双向保活，断线自动重连。
 
 ## 限制
