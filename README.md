@@ -86,6 +86,7 @@ mybox ssh prod -f 8080:9080        # 同时把远端 8080 映射到本地 9080
 mybox ssh prod -f 8080:9080,3306:9306
 mybox ssh prod --local-port 2222   # 固定本地 ssh 端口，默认随机
 mybox ssh prod --ftp 35121         # 把内置 FTP 映射到本地 35121
+mybox ssh prod --kill-stale        # 清理占用固定本地端口的残留进程后再连
 mybox ssh prod -- ls -l /var/log   # -- 之后的参数原样交给 ssh
 ```
 
@@ -101,6 +102,14 @@ mybox ssh prod -- -f -L 9090:localhost:80         # ssh 自己的 -f，后台运
 注意 mybox 自己也占用了 `-f`（转发），要用 ssh 的 `-f` 必须放到 `--` 之后。多条命令要整体加引号传一个字符串，否则会被 ssh 按空格重新拼接。
 
 ssh 会话结束时，所有由它拉起的本地监听端口会一起关闭——包括 `--ftp`、`-f` 的转发端口、FTP 被动模式临时开的数据端口，以及本地 ssh 端口。不需要手动清理。
+
+如果上次连接被强制中断（设备内存不足进程被杀、强关终端），`finally` 来不及执行，固定本地端口可能被残留进程占住，重连时报 `Address already in use`。加 `--kill-stale` 会在监听前找出占用这些固定端口的进程并终止，然后重连：
+
+```bash
+mybox ssh prod --local-port 2222 --ftp 35121 --kill-stale
+```
+
+只处理显式固定的端口（`--local-port`、`--ftp`、`-f` 的本地端口），不会碰随机端口，也不会终止自己或父进程。Linux 查 `/proc`，macOS 查 `lsof`。
 
 连接过程会在 stderr 打日志，每步一行，方便定位卡在哪：
 

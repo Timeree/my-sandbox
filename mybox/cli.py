@@ -1,10 +1,12 @@
 import argparse
 import base64
 import os
+import signal
 import socket
 import subprocess
 import sys
 import tempfile
+import time
 
 from . import __version__, boxes, serve, tunnel
 
@@ -152,6 +154,65 @@ def log(*parts):
     print(f"[mybox] {' '.join(str(p) for p in parts)}", file=sys.stderr, flush=True)
 
 
+def port_pids(port):
+    """PIDs listening on a local TCP port (Linux /proc, macOS lsof)."""
+    pids = set()
+    if os.path.exists("/proc/net/tcp"):
+        inodes = set()
+        for path in ("/proc/net/tcp", "/proc/net/tcp6"):
+            try:
+                lines = open(path).read().splitlines()[1:]
+            except OSError:
+                continue
+            for line in lines:
+                cols = line.split()
+                if (len(cols) > 9 and cols[3] == "0A"
+                        and int(cols[1].rsplit(":", 1)[1], 16) == port):
+                    inodes.add(cols[9])
+        for name in os.listdir("/proc"):
+            if not name.isdigit():
+                continue
+            fd_dir = f"/proc/{name}/fd"
+            try:
+                fds = os.listdir(fd_dir)
+            except OSError:
+                continue
+            for fd in fds:
+                try:
+                    link = os.readlink(f"{fd_dir}/{fd}")
+                except OSError:
+                    continue
+                if link.startswith("socket:[") and link[8:-1] in inodes:
+                    pids.add(int(name))
+                    break
+        return pids
+    try:
+        out = subprocess.run(["lsof", "-tiTCP:" + str(port), "-sTCP:LISTEN"],
+                             capture_output=True, text=True, timeout=5)
+        return {int(x) for x in out.stdout.split() if x.isdigit()}
+    except (OSError, subprocess.SubprocessError):
+        return set()
+
+
+def kill_stale(ports):
+    """Terminate processes holding the given local ports, then wait for release."""
+    skip = {os.getpid(), os.getppid()}
+    for port in ports:
+        for pid in port_pids(port):
+            if pid in skip:
+                continue
+            try:
+                os.kill(pid, signal.SIGTERM)
+                log(f"killed stale pid {pid} on local port {port}")
+            except OSError:
+                pass
+    for port in ports:
+        for _ in range(20):
+            if not port_pids(port):
+                break
+            time.sleep(0.1)
+
+
 def probe_ssh(port, timeout=10):
     """Read the SSH banner through the tunnel; return (ok, detail)."""
     try:
@@ -181,6 +242,13 @@ def cmd_ssh(args):
         sys.exit(str(exc))
     if args.ftp is not None:
         forwards.append((2121, args.ftp, True))
+
+    if args.kill_stale:
+        ports = {local for _, local, _ in forwards if local}
+        if args.local_port:
+            ports.add(args.local_port)
+        if ports:
+            kill_stale(sorted(ports))
 
     url = store[name]["url"]
     log(f"connecting to {name}: {url}")
@@ -277,6 +345,8 @@ def main(argv=None):
                    help="map the box's ftp (2121) to this local port")
     p.add_argument("--remote-port", type=int, default=22, help="sshd port on the box")
     p.add_argument("--local-port", type=int, default=0, help="local port for ssh, random by default")
+    p.add_argument("--kill-stale", action="store_true",
+                   help="kill stale processes occupying fixed local ports before connecting")
     p.add_argument("--user", default=os.environ.get("MYBOX_USER", "root"))
     p.add_argument("--password", default=os.environ.get("MYBOX_PASS", "myboxpass"))
     p.set_defaults(func=cmd_ssh)
