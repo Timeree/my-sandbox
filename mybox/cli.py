@@ -155,7 +155,7 @@ def log(*parts):
 
 
 def port_pids(port):
-    """PIDs listening on a local TCP port."""
+    """PIDs holding a local TCP port in any state (LISTEN, ESTABLISHED, ...)."""
     pids = set()
     if os.path.exists("/proc/net/tcp"):
         inodes = set()
@@ -166,7 +166,7 @@ def port_pids(port):
                 continue
             for line in lines:
                 cols = line.split()
-                if (len(cols) > 9 and cols[3] == "0A"
+                if (len(cols) > 9
                         and int(cols[1].rsplit(":", 1)[1], 16) == port):
                     inodes.add(cols[9])
         for name in os.listdir("/proc"):
@@ -186,13 +186,12 @@ def port_pids(port):
                     pids.add(int(name))
                     break
     if not pids:
-        for cmd in (["lsof", "-nP", "-t", f"-iTCP:{port}", "-sTCP:LISTEN"],
-                    ["lsof", "-nP", "-t", f"-i:{port}"]):
-            try:
-                out = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-                pids.update(int(x) for x in out.stdout.split() if x.isdigit())
-            except (OSError, subprocess.SubprocessError):
-                break
+        try:
+            out = subprocess.run(["lsof", "-nP", "-t", f"-iTCP:{port}"],
+                                 capture_output=True, text=True, timeout=5)
+            pids.update(int(x) for x in out.stdout.split() if x.isdigit())
+        except (OSError, subprocess.SubprocessError):
+            pass
     return pids
 
 
@@ -276,17 +275,23 @@ def cmd_ssh(args):
                 raise
             log(f"port {local} still busy: {exc}; retrying after cleanup")
             kill_stale([local])
-            return box.forward(remote, local, ftp)
+            try:
+                return box.forward(remote, local, ftp)
+            except OSError:
+                actual = box.forward(remote, 0, ftp)
+                log(f"port {local} holder not visible, using free port {actual}")
+                return actual
 
     try:
         ssh_port = listen(args.remote_port, args.local_port, None)
+        bound = []
         for remote, local, ftp in forwards:
-            listen(remote, local, ftp)
+            bound.append((remote, listen(remote, local, ftp), ftp))
     except OSError as exc:
         box.close()
-        sys.exit(f"cannot listen on 127.0.0.1: {exc} (try --kill-stale, or pick another port)")
+        sys.exit(f"cannot listen: {exc}")
     log(f"listening: ssh 127.0.0.1:{ssh_port}" +
-        ("".join(f", ftp {local}" for _, local, ftp in forwards if ftp) or ""))
+        ("".join(f", ftp {port}" for _, port, ftp in bound if ftp) or ""))
 
     ok, detail = probe_ssh(ssh_port)
     if not ok:
