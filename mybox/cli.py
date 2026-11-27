@@ -155,7 +155,7 @@ def log(*parts):
 
 
 def port_pids(port):
-    """PIDs listening on a local TCP port (Linux /proc, macOS lsof)."""
+    """PIDs listening on a local TCP port."""
     pids = set()
     if os.path.exists("/proc/net/tcp"):
         inodes = set()
@@ -185,32 +185,41 @@ def port_pids(port):
                 if link.startswith("socket:[") and link[8:-1] in inodes:
                     pids.add(int(name))
                     break
-        return pids
-    try:
-        out = subprocess.run(["lsof", "-tiTCP:" + str(port), "-sTCP:LISTEN"],
-                             capture_output=True, text=True, timeout=5)
-        return {int(x) for x in out.stdout.split() if x.isdigit()}
-    except (OSError, subprocess.SubprocessError):
-        return set()
+    if not pids:
+        for cmd in (["lsof", "-nP", "-t", f"-iTCP:{port}", "-sTCP:LISTEN"],
+                    ["lsof", "-nP", "-t", f"-i:{port}"]):
+            try:
+                out = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                pids.update(int(x) for x in out.stdout.split() if x.isdigit())
+            except (OSError, subprocess.SubprocessError):
+                break
+    return pids
 
 
 def kill_stale(ports):
     """Terminate processes holding the given local ports, then wait for release."""
     skip = {os.getpid(), os.getppid()}
     for port in ports:
-        for pid in port_pids(port):
-            if pid in skip:
-                continue
+        found = port_pids(port)
+        log(f"port {port}: {len(found)} holder(s)")
+        victims = [p for p in found if p not in skip]
+        for pid in victims:
             try:
                 os.kill(pid, signal.SIGTERM)
                 log(f"killed stale pid {pid} on local port {port}")
-            except OSError:
-                pass
-    for port in ports:
+            except OSError as exc:
+                log(f"cannot kill pid {pid} on port {port}: {exc}")
         for _ in range(20):
             if not port_pids(port):
                 break
             time.sleep(0.1)
+        else:
+            for pid in victims:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                    log(f"force-killed stale pid {pid} on local port {port}")
+                except OSError:
+                    pass
 
 
 def probe_ssh(port, timeout=10):
@@ -259,13 +268,23 @@ def cmd_ssh(args):
         sys.exit(f"cannot reach {name}: {detail}")
     log("tunnel ready")
 
-    ssh_port = box.forward(args.remote_port, args.local_port)
-    for remote, local, ftp in forwards:
+    def listen(remote, local, ftp):
         try:
-            box.forward(remote, local, ftp)
+            return box.forward(remote, local, ftp)
         except OSError as exc:
-            box.close()
-            sys.exit(f"cannot listen on 127.0.0.1:{local}: {exc}")
+            if not (args.kill_stale and local):
+                raise
+            log(f"port {local} still busy: {exc}; retrying after cleanup")
+            kill_stale([local])
+            return box.forward(remote, local, ftp)
+
+    try:
+        ssh_port = listen(args.remote_port, args.local_port, None)
+        for remote, local, ftp in forwards:
+            listen(remote, local, ftp)
+    except OSError as exc:
+        box.close()
+        sys.exit(f"cannot listen on 127.0.0.1: {exc} (try --kill-stale, or pick another port)")
     log(f"listening: ssh 127.0.0.1:{ssh_port}" +
         ("".join(f", ftp {local}" for _, local, ftp in forwards if ftp) or ""))
 

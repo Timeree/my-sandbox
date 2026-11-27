@@ -109,7 +109,9 @@ ssh 会话结束时，所有由它拉起的本地监听端口会一起关闭—�
 mybox ssh prod --local-port 2222 --ftp 35121 --kill-stale
 ```
 
-只处理显式固定的端口（`--local-port`、`--ftp`、`-f` 的本地端口），不会碰随机端口，也不会终止自己或父进程。Linux 查 `/proc`，macOS 查 `lsof`。
+只处理显式固定的端口（`--local-port`、`--ftp`、`-f` 的本地端口），不会碰随机端口，也不会终止自己或父进程。定位占用进程优先查 `/proc`，查不到再回退 `lsof`；`SIGTERM` 无效时升级 `SIGKILL`。连接时若端口仍被占，会就地再清一次并重试。
+
+清理过程在 stderr 打诊断，例如 `port 35121: 1 holder(s)` / `killed stale pid 12345`。如果显示 `0 holder(s)` 却仍报占用，多半是内核 TIME_WAIT 状态（无进程持有，几十秒后自行释放），换个本地端口即可。
 
 连接过程会在 stderr 打日志，每步一行，方便定位卡在哪：
 
