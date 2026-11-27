@@ -26,15 +26,34 @@ mybox update
 
 ```bash
 mybox serve --port 3000
+mybox serve -p              # 运行时生成随机密码并打印
+mybox serve -p ABCD1234     # 指定密码
 ```
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
+| `-p`, `--password` | 无 | 握手口令校验，见下 |
 | `--port` | `$PORT` 或 `3000` | HTTP/WebSocket 监听端口 |
 | `--ssh-port` | `$SSH_PORT` 或 `22` | SSH 端口，按需拉起 sshd |
 | `--ftp-port` | `$FTP_PORT` 或 `2121` | 内置 FTP 端口，随 serve 一起常驻 |
 
 只接受 `/my-sandbox` 一个路径的 WebSocket 升级，其余 404。
+
+### 握手密码 `-p`
+
+这是网关 sharecode 之外、由服务端自己把关的一层校验，只在服务端开启：
+
+- 不带 `-p`：不校验，行为同旧版。
+- `mybox serve -p`：启动时生成一个 8 位 base32 随机密码（如 `S4FBA7WS`），打印在启动信息里。
+- `mybox serve -p ABCD1234`：用指定密码。
+
+开启后，客户端的 GET 请求必须带 `p=<密码>`，否则服务端返回 401、握手不通过。把密码作为 URL 的 query 参数即可，它和 sharecode 一样会原样进入握手请求：
+
+```bash
+mybox add "https://host/my-sandbox?sharecode=XXX&p=ABCD1234"
+```
+
+`add` 的连通探测和 `ssh` 都会自动携带这个 `p`。密码等同凭据，别和 URL 一起外泄。
 
 `mybox serve` 起来就会在 `--ftp-port` 上常驻一个 **无用户名密码、全权限、根目录 `/`** 的 FTP 服务。客户端连不连由自己决定，不连它也不占隧道。因为无认证又能读写整个文件系统，**不要把这个端口直接暴露在公网**，只通过 SSH 隧道访问。
 

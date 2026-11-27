@@ -247,6 +247,8 @@ def main(argv=None):
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("serve", help="run the server side")
+    p.add_argument("-p", "--password", nargs="?", const=True, default=None,
+                   help="require ?p= on the handshake; omit value to generate a random one")
     p.add_argument("--port", type=int, default=int(os.environ.get("PORT", 3000)))
     p.add_argument("--ssh-port", type=int, default=int(os.environ.get("SSH_PORT", 22)))
     p.add_argument("--ftp-port", type=int, default=int(os.environ.get("FTP_PORT", 2121)))

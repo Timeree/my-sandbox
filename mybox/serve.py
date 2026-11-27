@@ -1,5 +1,6 @@
 import os
 import queue
+import secrets
 import socket
 import struct
 import subprocess
@@ -7,11 +8,13 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
 
 from . import ftpd, wsproto
 
 SSHD_CONFIG = "/tmp/mybox-sshd_config"
 PATHS = {"/my-sandbox"}
+BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
 
 DATA, OPEN, FIN, RESET = 0, 1, 2, 3
 HDR = struct.Struct("!IB")
@@ -56,6 +59,17 @@ def probe(port, timeout=1):
         return True
     except OSError:
         return False
+
+
+def random_password(n=8):
+    return "".join(secrets.choice(BASE32) for _ in range(n))
+
+
+def check_password(path, password):
+    if not password:
+        return True
+    query = parse_qs(urlparse(path).query)
+    return query.get("p", [None])[0] == password
 
 
 class Mux:
@@ -297,6 +311,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.split("?", 1)[0] not in PATHS:
             self.send_error(404)
             return
+        if not check_password(self.path, self.server.password):
+            self.send_error(401)
+            return
         self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         wsproto.keepalive(self.connection)
         self.send_response(101, "Switching Protocols")
@@ -318,11 +335,18 @@ def start_ftp(port):
 
 
 def run(args):
+    password = args.password
+    if password is True:
+        password = random_password()
     services = {args.ssh_port: lambda: start_sshd(args.ssh_port)}
     server = ThreadingHTTPServer(("0.0.0.0", args.port), Handler)
     server.services = services
+    server.password = password
     threading.Thread(target=start_ftp, args=(args.ftp_port,), daemon=True).start()
-    print(f"mybox serve: http {args.port}, ssh {args.ssh_port}, ftp {args.ftp_port}", flush=True)
+    info = f"mybox serve: http {args.port}, ssh {args.ssh_port}, ftp {args.ftp_port}"
+    if password:
+        info += f", password {password}"
+    print(info, flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
