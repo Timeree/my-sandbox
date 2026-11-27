@@ -17,7 +17,7 @@ SSHD_CONFIG = "/tmp/mybox-sshd_config"
 PATHS = {"/my-sandbox"}
 BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
 PROXY_PREFIX = "/my-sandbox"
-CONTROL_PARAMS = {"port", "p", "sharecode"}
+CONTROL_PARAMS = {"port", "p"}
 HOP_HEADERS = {
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
     "te", "trailer", "transfer-encoding", "upgrade",
