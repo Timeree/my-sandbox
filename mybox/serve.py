@@ -408,8 +408,9 @@ class Handler(BaseHTTPRequestHandler):
             resp = conn.getresponse()
             data = resp.read()
             self.send_response(resp.status, resp.reason)
+            skip = HOP_HEADERS | {"content-length", "server", "date"}
             for k, v in resp.getheaders():
-                if k.lower() not in HOP_HEADERS:
+                if k.lower() not in skip:
                     self.send_header(k, v)
             self.send_header("Set-Cookie", f"mybox_port={port}; Path=/; Max-Age=86400")
             self.send_header("Content-Length", str(len(data)))
