@@ -111,7 +111,7 @@ mybox ssh prod --local-port 2222 --ftp 35121 --kill-stale
 
 只处理显式固定的端口（`--local-port`、`--ftp`、`-f` 的本地端口），不会碰随机端口，也不会终止自己或父进程。定位占用进程优先查 `/proc`（LISTEN、ESTABLISHED、CLOSE_WAIT 等所有 TCP 状态），查不到再回退 `lsof`；`SIGTERM` 无效时升级 `SIGKILL`。连接时若端口仍被占，会就地再清一次并重试。
 
-清理过程在 stderr 打诊断，例如 `port 35121: 1 holder(s)` / `killed stale pid 12345`。若清理后仍报占用（占用者不可见，如跨网络命名空间或其他用户的 socket），不会直接失败——会自动改用系统分配的空闲端口，并打出 `port 35121 holder not visible, using free port 41234`，`listening:` 行显示实际端口。此时 FTP 客户端连日志里显示的端口即可，不必再执着原端口。
+清理过程在 stderr 打诊断，例如 `port 35121: 1 holder(s)` / `killed stale pid 12345`。若清理后该端口仍被占用（占用者不可见，如跨网络命名空间或其他用户的 socket），直接失败并报 `cannot listen: [Errno 98] Address already in use on 127.0.0.1:35121`，不会擅自换端口。此时需自行释放该端口或换一个本地端口。
 
 连接过程会在 stderr 打日志，每步一行，方便定位卡在哪：
 

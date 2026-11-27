@@ -272,26 +272,23 @@ def cmd_ssh(args):
             return box.forward(remote, local, ftp)
         except OSError as exc:
             if not (args.kill_stale and local):
-                raise
+                raise OSError(exc.errno, f"{exc.strerror} on 127.0.0.1:{local}") from exc
             log(f"port {local} still busy: {exc}; retrying after cleanup")
             kill_stale([local])
             try:
                 return box.forward(remote, local, ftp)
-            except OSError:
-                actual = box.forward(remote, 0, ftp)
-                log(f"port {local} holder not visible, using free port {actual}")
-                return actual
+            except OSError as exc:
+                raise OSError(exc.errno, f"{exc.strerror} on 127.0.0.1:{local}") from exc
 
     try:
         ssh_port = listen(args.remote_port, args.local_port, None)
-        bound = []
         for remote, local, ftp in forwards:
-            bound.append((remote, listen(remote, local, ftp), ftp))
+            listen(remote, local, ftp)
     except OSError as exc:
         box.close()
         sys.exit(f"cannot listen: {exc}")
     log(f"listening: ssh 127.0.0.1:{ssh_port}" +
-        ("".join(f", ftp {port}" for _, port, ftp in bound if ftp) or ""))
+        ("".join(f", ftp {local}" for _, local, ftp in forwards if ftp) or ""))
 
     ok, detail = probe_ssh(ssh_port)
     if not ok:
