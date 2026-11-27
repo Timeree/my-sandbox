@@ -1,3 +1,4 @@
+import http.client
 import os
 import queue
 import secrets
@@ -8,13 +9,19 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 from . import ftpd, wsproto
 
 SSHD_CONFIG = "/tmp/mybox-sshd_config"
 PATHS = {"/my-sandbox"}
 BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+PROXY_PREFIX = "/my-sandbox"
+CONTROL_PARAMS = {"port", "p", "sharecode"}
+HOP_HEADERS = {
+    "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
+    "te", "trailer", "transfer-encoding", "upgrade",
+}
 
 DATA, OPEN, FIN, RESET = 0, 1, 2, 3
 HDR = struct.Struct("!IB")
@@ -304,10 +311,35 @@ class Handler(BaseHTTPRequestHandler):
     rbufsize = 0
 
     def do_GET(self):
-        key = self.headers.get("Sec-WebSocket-Key")
-        if not key or self.headers.get("Upgrade", "").lower() != "websocket":
-            self.send_error(404)
-            return
+        if self._is_websocket():
+            self._tunnel()
+        else:
+            self._proxy()
+
+    def do_POST(self):
+        self._proxy()
+
+    def do_PUT(self):
+        self._proxy()
+
+    def do_DELETE(self):
+        self._proxy()
+
+    def do_PATCH(self):
+        self._proxy()
+
+    def do_HEAD(self):
+        self._proxy()
+
+    def do_OPTIONS(self):
+        self._proxy()
+
+    def _is_websocket(self):
+        return (self.headers.get("Sec-WebSocket-Key")
+                and self.headers.get("Upgrade", "").lower() == "websocket")
+
+    def _tunnel(self):
+        key = self.headers["Sec-WebSocket-Key"]
         if self.path.split("?", 1)[0] not in PATHS:
             self.send_error(404)
             return
@@ -322,6 +354,63 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Sec-WebSocket-Accept", wsproto.accept_key(key))
         self.end_headers()
         Mux(self.connection, self.server.services).run()
+
+    def _cookie(self, name):
+        for item in self.headers.get("Cookie", "").split(";"):
+            k, _, v = item.strip().partition("=")
+            if k == name:
+                return v
+        return None
+
+    def _proxy(self):
+        parsed = urlparse(self.path)
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        port = query.get("port", [self._cookie("mybox_port")])[0]
+        if port is None:
+            self.send_error(404, "missing port parameter")
+            return
+        if not check_password(self.path, self.server.password):
+            self.send_error(401)
+            return
+        try:
+            port = int(port)
+        except (TypeError, ValueError):
+            self.send_error(400, "bad port")
+            return
+        if not 1 <= port <= 65535:
+            self.send_error(400, "bad port")
+            return
+
+        base = parsed.path
+        if base.startswith(PROXY_PREFIX):
+            base = base[len(PROXY_PREFIX):] or "/"
+        forward = {k: v for k, v in query.items() if k not in CONTROL_PARAMS}
+        target = base + ("?" + urlencode(forward, doseq=True) if forward else "")
+
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        body = self.rfile.read(length) if length else None
+        headers = {k: v for k, v in self.headers.items()
+                   if k.lower() not in HOP_HEADERS}
+        try:
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=60)
+            conn.request(self.command, target, body=body, headers=headers)
+            resp = conn.getresponse()
+            data = resp.read()
+            self.send_response(resp.status, resp.reason)
+            for k, v in resp.getheaders():
+                if k.lower() not in HOP_HEADERS:
+                    self.send_header(k, v)
+            self.send_header("Set-Cookie", f"mybox_port={port}; Path=/; Max-Age=86400")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(data)
+            conn.close()
+        except (OSError, http.client.HTTPException) as exc:
+            try:
+                self.send_error(502, f"upstream error: {exc}")
+            except (OSError, ValueError):
+                pass
 
     def log_message(self, *args):
         pass
