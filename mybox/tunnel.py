@@ -70,6 +70,10 @@ class Sink:
 
 class FtpSink(Sink):
     LOCAL = {
+        b"USER": b"230 logged in\r\n",
+        b"PASS": b"230 logged in\r\n",
+        b"SYST": b"215 UNIX Type: L8\r\n",
+        b"FEAT": b"211-Features\r\n PASV\r\n EPSV\r\n SIZE\r\n UTF8\r\n MLSD\r\n211 End\r\n",
         b"TYPE": b"200 type set\r\n",
         b"OPTS": b"200 ok\r\n",
         b"CLNT": b"200 ok\r\n",
