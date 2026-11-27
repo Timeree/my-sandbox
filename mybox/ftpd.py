@@ -173,6 +173,26 @@ class FtpHandler(socketserver.StreamRequestHandler):
         names = sorted(os.listdir(self.cwd))
         self.transfer("".join(name + "\r\n" for name in names).encode())
 
+    def cmd_mlsd(self, arg):
+        names = sorted(os.listdir(self.cwd))
+        self.transfer("".join(self.mlsd_entry(name) for name in names).encode())
+
+    def mlsd_entry(self, name):
+        path = os.path.join(self.cwd, name)
+        try:
+            modified = time.strftime("%Y%m%d%H%M%S", time.gmtime(os.path.getmtime(path)))
+        except OSError:
+            modified = "19700101000000"
+        if os.path.isdir(path):
+            facts = f"Type=dir;Modify={modified};Perm=el;"
+        else:
+            try:
+                size = os.path.getsize(path)
+            except OSError:
+                size = 0
+            facts = f"Type=file;Size={size};Modify={modified};Perm=f;"
+        return f"{facts} {name}\r\n"
+
     def cmd_retr(self, arg):
         target = self.resolve(arg)
         if not target or not os.path.isfile(target):
