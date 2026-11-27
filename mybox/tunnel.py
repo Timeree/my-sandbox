@@ -172,6 +172,7 @@ class Mux:
         self.streams = {}
         self.next_id = 0
         self.ready = threading.Event()
+        self.last_error = None
         self.stopped = False
         self.listeners = []
         self.listeners_lock = threading.Lock()
@@ -206,13 +207,15 @@ class Mux:
         while not self.stopped:
             try:
                 sock = self.opener()
-            except (OSError, EOFError, RuntimeError):
+            except (OSError, EOFError, RuntimeError) as exc:
+                self.last_error = str(exc) or type(exc).__name__
                 time.sleep(2)
                 continue
             if self.stopped:
                 close_socket(sock)
                 return
             self.sock = sock
+            self.last_error = None
             self.ready.set()
             self._reader(sock)
             self.ready.clear()

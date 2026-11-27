@@ -187,7 +187,8 @@ def cmd_ssh(args):
     box = tunnel.Tunnel(url)
     if not box.wait_ready(20):
         box.close()
-        sys.exit(f"cannot reach {name}: {url}")
+        detail = box.mux.last_error or url
+        sys.exit(f"cannot reach {name}: {detail}")
     log("tunnel ready")
 
     ssh_port = box.forward(args.remote_port, args.local_port)
