@@ -55,19 +55,19 @@ mybox add "https://host/my-sandbox?token=XXX&p=ABCD1234"
 
 `add` 的连通探测和 `ssh` 都会自动携带这个 `p`。密码等同凭据，别和 URL 一起外泄。
 
-### 直连端口（URL `port` 参数）
+### 直连端口（URL 路径）
 
-给网址加 `port=<端口>`，服务端收到普通 HTTP 请求时不再走沙箱隧道，而是直接反向代理到沙箱内的 `127.0.0.1:<端口>`。沙箱里跑的 Web 服务（Gradio、Jupyter、静态站等）可以就这么从浏览器直接打开，不必先 `mybox ssh -f`：
+端口写在路径里：`/my-sandbox/<端口>/`。服务端收到普通 HTTP 请求时不再走沙箱隧道，而是直接反向代理到沙箱内的 `127.0.0.1:<端口>`。沙箱里跑的 Web 服务（Gradio、Jupyter、静态站等）可以就这么从浏览器直接打开，不必先 `mybox ssh -f`：
 
 ```
-https://host/my-sandbox?token=XXX&port=8080
+https://host/my-sandbox/8080/?token=XXX
 ```
 
-- 路径 `/my-sandbox` 前缀会被去掉：`/my-sandbox/api?port=8080` → 后端 `/api`。
-- `port`、`p` 是控制参数，不会转给后端；其余 query 原样转发。
+- 端口后的路径原样转给后端：`/my-sandbox/8080/api?page=2` → 后端 `/api?page=2`。
+- `p` 是控制参数，不会转给后端；其余 query 原样转发。
 - 支持 GET/POST/PUT/DELETE/PATCH/HEAD/OPTIONS，请求体和响应原样透传。
-- 首次带 `port` 的响应会种一个 `mybox_port` cookie，之后不带 `port` 的相对路径请求（如页面里的 `/app.js`）也按同一端口代理，页面里用绝对路径的链接才能正常工作。cookie 一天有效。
-- WebSocket 升级请求（`mybox ssh` 等）带 `port` 也不受影响，仍走隧道。
+- 路径式让 Web 应用可以把 root path 配成 `/my-sandbox/8080`，页面里的资源请求自动带端口前缀。若应用没配 root path，首次响应会种 `mybox_port` cookie，之后不带端口前缀的请求（如页面里的 `/app.js`）仍按同一端口代理，作为兜底。cookie 一天有效。
+- WebSocket 升级请求（`mybox ssh` 等）仍走 `/my-sandbox`，不受端口路径影响。
 - 服务端开了 `-p` 时这个代理同样校验 `p`（首次带上即可，之后靠 cookie）。
 - 后端连不上返回 502。这个代理能访问沙箱内任意本地端口，鉴权只靠入口 URL 自带的鉴权和服务端 `-p`，**同样不要裸奔公网**。
 
