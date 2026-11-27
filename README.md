@@ -55,6 +55,22 @@ mybox add "https://host/my-sandbox?sharecode=XXX&p=ABCD1234"
 
 `add` 的连通探测和 `ssh` 都会自动携带这个 `p`。密码等同凭据，别和 URL 一起外泄。
 
+### 直连端口（URL `port` 参数）
+
+给网址加 `port=<端口>`，服务端收到普通 HTTP 请求时不再走沙箱隧道，而是直接反向代理到沙箱内的 `127.0.0.1:<端口>`。沙箱里跑的 Web 服务（Gradio、Jupyter、静态站等）可以就这么从浏览器直接打开，不必先 `mybox ssh -f`：
+
+```
+https://host/my-sandbox?sharecode=XXX&port=8080
+```
+
+- 路径 `/my-sandbox` 前缀会被去掉：`/my-sandbox/api?port=8080` → 后端 `/api`。
+- `port`、`p`、`sharecode` 是控制参数，不会转给后端；其余 query 原样转发。
+- 支持 GET/POST/PUT/DELETE/PATCH/HEAD/OPTIONS，请求体和响应原样透传。
+- 首次带 `port` 的响应会种一个 `mybox_port` cookie，之后不带 `port` 的相对路径请求（如页面里的 `/app.js`）也按同一端口代理，页面里用绝对路径的链接才能正常工作。cookie 一天有效。
+- WebSocket 升级请求（`mybox ssh` 等）带 `port` 也不受影响，仍走隧道。
+- 服务端开了 `-p` 时这个代理同样校验 `p`（首次带上即可，之后靠 cookie）。
+- 后端连不上返回 502。这个代理能访问沙箱内任意本地端口，鉴权只靠网关 sharecode 和服务端 `-p`，**同样不要裸奔公网**。
+
 `mybox serve` 起来就会在 `--ftp-port` 上常驻一个 **无用户名密码、全权限、根目录 `/`** 的 FTP 服务。客户端连不连由自己决定，不连它也不占隧道。因为无认证又能读写整个文件系统，**不要把这个端口直接暴露在公网**，只通过 SSH 隧道访问。
 
 ## 客户端
