@@ -344,6 +344,8 @@ def main(argv=None):
     p.add_argument("--ftp-port", type=int, default=int(os.environ.get("FTP_PORT", 2121)))
     p.add_argument("--no-web", action="store_true",
                    help="disable the browser terminal at /my-sandbox/xterm")
+    p.add_argument("--shell-password", default=os.environ.get("MYBOX_PASS", "myboxpass"),
+                   help="sshd login password used by the browser terminal")
     p.set_defaults(func=cmd_serve)
 
     p = sub.add_parser("add", help="remember a box url")
