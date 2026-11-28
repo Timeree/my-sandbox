@@ -11,10 +11,12 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode, urlparse
 
-from . import ftpd, wsproto
+from . import ftpd, webshell, wsproto
 
 SSHD_CONFIG = "/tmp/mybox-sshd_config"
 PATHS = {"/my-sandbox"}
+WEB_PATH = webshell.PATH
+WEB_WS_PATH = webshell.WS_PATH
 BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
 PROXY_PREFIX = "/my-sandbox"
 CONTROL_PARAMS = {"port", "p"}
@@ -311,8 +313,16 @@ class Handler(BaseHTTPRequestHandler):
     rbufsize = 0
 
     def do_GET(self):
+        path = self.path.split("?", 1)[0]
         if self._is_websocket():
-            self._tunnel()
+            if path == WEB_WS_PATH:
+                self._webshell()
+            elif path in PATHS:
+                self._tunnel()
+            else:
+                self.send_error(404)
+        elif path == WEB_PATH:
+            self._webpage()
         else:
             self._proxy()
 
@@ -354,6 +364,38 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Sec-WebSocket-Accept", wsproto.accept_key(key))
         self.end_headers()
         Mux(self.connection, self.server.services).run()
+
+    def _webpage(self):
+        if not self.server.web:
+            self.send_error(404)
+            return
+        if not check_password(self.path, self.server.password):
+            self.send_error(401)
+            return
+        body = webshell.PAGE.encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _webshell(self):
+        if not self.server.web:
+            self.send_error(404)
+            return
+        if not check_password(self.path, self.server.password):
+            self.send_error(401)
+            return
+        key = self.headers["Sec-WebSocket-Key"]
+        self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        wsproto.keepalive(self.connection)
+        self.send_response(101, "Switching Protocols")
+        self.send_header("Upgrade", "websocket")
+        self.send_header("Connection", "Upgrade")
+        self.send_header("Sec-WebSocket-Accept", wsproto.accept_key(key))
+        self.end_headers()
+        webshell.run(self.connection)
 
     def _cookie(self, name):
         for item in self.headers.get("Cookie", "").split(";"):
@@ -443,10 +485,13 @@ def run(args):
     server = ThreadingHTTPServer(("0.0.0.0", args.port), Handler)
     server.services = services
     server.password = password
+    server.web = not args.no_web
     threading.Thread(target=start_ftp, args=(args.ftp_port,), daemon=True).start()
     info = f"mybox serve: http {args.port}, ssh {args.ssh_port}, ftp {args.ftp_port}"
     if password:
         info += f", password {password}"
+    if server.web:
+        info += f", web {WEB_PATH}"
     print(info, flush=True)
     try:
         server.serve_forever()
