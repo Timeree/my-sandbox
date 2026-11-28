@@ -70,6 +70,31 @@ def probe(port, timeout=1):
         return False
 
 
+def ensure_service(port, services, lock):
+    starter = services.get(port)
+    if starter is None:
+        return True
+    if probe(port):
+        return True
+    with lock:
+        if probe(port):
+            return True
+        if port == 22:
+            try:
+                os.makedirs("/run/sshd", exist_ok=True)
+            except OSError:
+                pass
+        try:
+            starter()
+        except (OSError, subprocess.SubprocessError):
+            pass
+    for _ in range(50):
+        if probe(port, timeout=0.2):
+            return True
+        time.sleep(0.1)
+    return False
+
+
 def random_password(n=8):
     return "".join(secrets.choice(BASE32) for _ in range(n))
 
@@ -111,28 +136,7 @@ class Mux:
             pass
 
     def ensure(self, port):
-        starter = self.services.get(port)
-        if starter is None:
-            return True
-        if probe(port):
-            return True
-        with self.start_lock:
-            if probe(port):
-                return True
-            if port == 22:
-                try:
-                    os.makedirs("/run/sshd", exist_ok=True)
-                except OSError:
-                    pass
-            try:
-                starter()
-            except (OSError, subprocess.SubprocessError):
-                pass
-        for _ in range(50):
-            if probe(port, timeout=0.2):
-                return True
-            time.sleep(0.1)
-        return False
+        return ensure_service(port, self.services, self.start_lock)
 
     def open(self, sid, port):
         entry = {
@@ -387,6 +391,10 @@ class Handler(BaseHTTPRequestHandler):
         if not check_password(self.path, self.server.password):
             self.send_error(401)
             return
+        if not ensure_service(self.server.ssh_port, self.server.services,
+                              self.server.start_lock):
+            self.send_error(503, "sshd unavailable")
+            return
         key = self.headers["Sec-WebSocket-Key"]
         self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         wsproto.keepalive(self.connection)
@@ -395,7 +403,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Connection", "Upgrade")
         self.send_header("Sec-WebSocket-Accept", wsproto.accept_key(key))
         self.end_headers()
-        webshell.run(self.connection)
+        webshell.run(self.connection, self.server.ssh_port, self.server.shell_password)
 
     def _cookie(self, name):
         for item in self.headers.get("Cookie", "").split(";"):
@@ -486,6 +494,9 @@ def run(args):
     server.services = services
     server.password = password
     server.web = not args.no_web
+    server.ssh_port = args.ssh_port
+    server.shell_password = args.shell_password
+    server.start_lock = threading.Lock()
     threading.Thread(target=start_ftp, args=(args.ftp_port,), daemon=True).start()
     info = f"mybox serve: http {args.port}, ssh {args.ssh_port}, ftp {args.ftp_port}"
     if password:
