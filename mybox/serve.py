@@ -505,7 +505,8 @@ def run(args):
     limit = 0 if args.no_mem_guard else args.mem_guard
     if limit > 0:
         threading.Thread(target=memguard.run, args=(limit,), daemon=True).start()
-        print(f"mybox serve: mem guard on (threshold {limit:.0%}, every {memguard.INTERVAL}s)",
+        print(f"mybox serve: mem guard on: when memory >= {limit:.0%}, kill the largest "
+              f"process, checked every {memguard.INTERVAL}s (disable with --no-mem-guard)",
               flush=True)
     if server.web:
         print(f"mybox serve: web terminal enabled at http://localhost:{args.port}{WEB_PATH} "
