@@ -23,12 +23,12 @@ PAGE = """<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>mybox terminal</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
 <style>
-  html, body { height: 100%; margin: 0; background: #000; }
-  #term { height: 100%; box-sizing: border-box; padding: 6px; }
+  html, body { height: 100%; margin: 0; overflow: hidden; background: #000; }
+  #term { height: 100%; box-sizing: border-box; padding: 6px; touch-action: none; }
 </style>
 </head>
 <body>
@@ -44,8 +44,33 @@ PAGE = """<!doctype html>
   var term = new Terminal({ cursorBlink: true, fontFamily: 'Menlo, Consolas, monospace' });
   var fit = new (fitCtor())();
   term.loadAddon(fit);
-  term.open(document.getElementById('term'));
+  var el = document.getElementById('term');
+  term.open(el);
   fit.fit();
+
+  var pinch = null;
+  function spacing(t) {
+    var dx = t[0].clientX - t[1].clientX;
+    var dy = t[0].clientY - t[1].clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+  el.addEventListener('touchstart', function (e) {
+    if (e.touches.length === 2)
+      pinch = { gap: spacing(e.touches), size: term.options.fontSize };
+  }, { passive: false });
+  el.addEventListener('touchmove', function (e) {
+    if (e.touches.length !== 2 || !pinch) return;
+    e.preventDefault();
+    var size = Math.round(pinch.size * spacing(e.touches) / pinch.gap);
+    size = Math.max(8, Math.min(32, size));
+    if (size !== term.options.fontSize) {
+      term.options.fontSize = size;
+      fit.fit();
+    }
+  }, { passive: false });
+  el.addEventListener('touchend', function (e) {
+    if (e.touches.length < 2) pinch = null;
+  });
 
   var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   var ws = new WebSocket(proto + '//' + location.host + '__WS_PATH__' + location.search);
