@@ -1,6 +1,6 @@
 # mybox
 
-把一个 HTTP 入口变成 TCP 隧道。一条 WebSocket 承载所有连接，`mybox ssh` 直达远程 shell，`-f` 转发任意端口，`--ftp` 顺手把内置的全权限 FTP 服务拉到你本地。
+把一个 HTTP 入口变成 TCP 隧道。一条 WebSocket 承载所有连接，`mybox connect` 直达远程 shell（`ssh` 是它的别名），`-f` 转发任意端口，`--ssh`/`--ftp` 顺手把 ssh/FTP 服务拉到你本地。
 
 纯标准库，无第三方依赖。
 
@@ -75,7 +75,7 @@ mybox add "https://host/my-sandbox?token=XXX&p=ABCD1234"
 
 ### 直连端口（URL 路径）
 
-端口写在路径里：`/my-sandbox/<端口>/`。服务端收到普通 HTTP 请求时不再走沙箱隧道，而是直接反向代理到沙箱内的 `127.0.0.1:<端口>`。沙箱里跑的 Web 服务（Gradio、Jupyter、静态站等）可以就这么从浏览器直接打开，不必先 `mybox ssh -f`：
+端口写在路径里：`/my-sandbox/<端口>/`。服务端收到普通 HTTP 请求时不再走沙箱隧道，而是直接反向代理到沙箱内的 `127.0.0.1:<端口>`。沙箱里跑的 Web 服务（Gradio、Jupyter、静态站等）可以就这么从浏览器直接打开，不必先 `mybox connect -f`：
 
 ```
 https://host/my-sandbox/8080/?token=XXX
@@ -85,7 +85,7 @@ https://host/my-sandbox/8080/?token=XXX
 - `p` 是控制参数，不会转给后端；其余 query 原样转发。
 - 支持 GET/POST/PUT/DELETE/PATCH/HEAD/OPTIONS，请求体和响应原样透传。
 - 路径式让 Web 应用可以把 root path 配成 `/my-sandbox/8080`，页面里的资源请求自动带端口前缀。若应用没配 root path，首次响应会种 `mybox_port` cookie，之后不带端口前缀的请求（如页面里的 `/app.js`）仍按同一端口代理，作为兜底。cookie 一天有效。
-- WebSocket 升级请求（`mybox ssh` 等）仍走 `/my-sandbox`，不受端口路径影响。
+- WebSocket 升级请求（`mybox connect` 等）仍走 `/my-sandbox`，不受端口路径影响。
 - 服务端开了 `-p` 时这个代理同样校验 `p`（首次带上即可，之后靠 cookie）。
 - 后端连不上返回 502。这个代理能访问沙箱内任意本地端口，鉴权只靠入口 URL 自带的鉴权和服务端 `-p`，**同样不要裸奔公网**。
 
@@ -98,7 +98,7 @@ mybox add https://host/my-sandbox?token=XXX     # name 自动生成 box1、box2.
 mybox add prod https://host/my-sandbox?token=XXX
 mybox ls
 mybox rename prod production
-mybox ssh prod
+mybox connect prod
 ```
 
 ### `mybox add [name] [url]`
@@ -109,28 +109,30 @@ mybox ssh prod
 
 配置存在 `~/.config/mybox/boxes.json`（权限 600，url 里的鉴权参数等同凭据）。可用 `MYBOX_CONFIG_DIR` 改目录。
 
-### `mybox ssh [name]`
+### `mybox connect [name]`（`ssh` 是别名）
 
-name 省略时取第一个 box。自动完成建隧道、分配本地端口、填充密码，不需要再手动 `ssh`。
+`mybox ssh` 与 `mybox connect` 完全等价，两者跑的是同一套逻辑。name 省略时取第一个 box。自动完成建隧道、分配本地端口、填充密码，不需要再手动 `ssh`。
 
 ```bash
-mybox ssh                          # 第一个 box
-mybox ssh prod                     # 指定 box
-mybox ssh prod -f 8080:9080        # 同时把远端 8080 映射到本地 9080
-mybox ssh prod -f 8080:9080,3306:9306
-mybox ssh prod --local-port 2222   # 固定本地 ssh 端口，默认随机
-mybox ssh prod --ftp 35121         # 把内置 FTP 映射到本地 35121
-mybox ssh prod --kill-stale        # 清理占用固定本地端口的残留进程后再连
-mybox ssh prod -- ls -l /var/log   # -- 之后的参数原样交给 ssh
+mybox connect                          # 第一个 box
+mybox connect prod                     # 指定 box
+mybox connect prod -f 8080            # 远端 8080 → 本地 8080（单边写法）
+mybox connect prod -f 8080:9080       # 远端 8080 → 本地 9080
+mybox connect prod -f 8080:9080,3306:9306
+mybox connect prod --ssh 2222         # 把远端 ssh(22) 额外映射到本地 2222
+mybox connect prod --local-port 2222  # 固定本地 shell 用的 ssh 端口，默认随机
+mybox connect prod --ftp 35121        # 把内置 FTP 映射到本地 35121
+mybox connect prod --kill-stale       # 清理占用固定本地端口的残留进程后再连
+mybox connect prod -- ls -l /var/log  # -- 之后的参数原样交给 ssh
 ```
 
 `--` 后面的东西不会经过 mybox 解析，选项插在目标主机之前，命令跟在主机之后，跟原生 `ssh` 完全一致。因此可以用它做初始自动执行，或者干任何 mybox 没封装的事：
 
 ```bash
-mybox ssh prod -- 'uptime; df -h'
-mybox ssh prod -- -t 'cd /app && ls; exec bash'   # 进目录、看一眼、留在 shell 里
-mybox ssh prod -- -L 9090:localhost:80 -N         # 只做端口转发
-mybox ssh prod -- -f -L 9090:localhost:80         # ssh 自己的 -f，后台运行
+mybox connect prod -- 'uptime; df -h'
+mybox connect prod -- -t 'cd /app && ls; exec bash'   # 进目录、看一眼、留在 shell 里
+mybox connect prod -- -L 9090:localhost:80 -N         # 只做端口转发
+mybox connect prod -- -f -L 9090:localhost:80         # ssh 自己的 -f，后台运行
 ```
 
 注意 mybox 自己也占用了 `-f`（转发），要用 ssh 的 `-f` 必须放到 `--` 之后。多条命令要整体加引号传一个字符串，否则会被 ssh 按空格重新拼接。
@@ -140,7 +142,7 @@ ssh 会话结束时，所有由它拉起的本地监听端口会一起关闭—�
 如果上次连接被强制中断（设备内存不足进程被杀、强关终端），`finally` 来不及执行，固定本地端口可能被残留进程占住，重连时报 `Address already in use`。加 `--kill-stale` 会在监听前找出占用这些固定端口的进程并终止，然后重连：
 
 ```bash
-mybox ssh prod --local-port 2222 --ftp 35121 --kill-stale
+mybox connect prod --local-port 2222 --ftp 35121 --kill-stale
 ```
 
 只处理显式固定的端口（`--local-port`、`--ftp`、`-f` 的本地端口），不会碰随机端口，也不会终止自己或父进程。定位占用进程优先查 `/proc`（LISTEN、ESTABLISHED、CLOSE_WAIT 等所有 TCP 状态），查不到再回退 `lsof`；`SIGTERM` 无效时升级 `SIGKILL`。连接时若端口仍被占，会就地再清一次并重试。
@@ -160,13 +162,16 @@ mybox ssh prod --local-port 2222 --ftp 35121 --kill-stale
 
 | 参数 | 说明 |
 |---|---|
-| `-f/--forward REMOTE:LOCAL` | 远端端口 → 本地端口，逗号分隔或重复给出；`ftp:REMOTE:LOCAL` 强制按 FTP 处理 |
+| `-f/--forward [REMOTE:]LOCAL` | 端口转发：`PORT` 等价于 `PORT:PORT`，`REMOTE:LOCAL` 指定两端；逗号分隔或重复给出；`ftp:REMOTE:LOCAL` 强制按 FTP 处理 |
+| `--ssh LOCAL_PORT` | 把远端 ssh（`--remote-port`，默认 22）额外映射到本地该端口，与 `--ftp` 对称 |
 | `--ftp LOCAL_PORT` | 把远端 2121 的 FTP 映射到本地该端口，带被动模式改写 |
 | `--remote-port` | 远端 sshd 端口，默认 22 |
 | `--local-port` | 本地 ssh 端口，默认随机空闲端口 |
 | `--user` | 登录用户，默认 `$MYBOX_USER` 或 `root` |
 | `--password` | 登录密码，默认 `$MYBOX_PASS` 或 `myboxpass` |
 | `-- ...` | 之后的内容原样传给 ssh（选项/命令/转发） |
+
+`-f` 支持两种写法：`PORT` 是 `PORT:PORT` 的简写（远端和本地同为 8080），`REMOTE:LOCAL` 分别指定两端；两者可以混用，用逗号分隔或重复给 `-f`。`--ssh LOCAL_PORT` 等价于把远端 ssh 服务（默认 22，可用 `--remote-port` 改）额外转发到本地端口，与 `--ftp` 一样是纯 TCP 转发。
 
 `-f` 是纯 TCP 转发，不带协议感知。转发 21 或 2121 端口时会自动接管 FTP 被动模式（改写 `227`/`229` 里的地址端口，每个数据连接单独开一条流），所以 FileZilla 可以直接连本地端口。
 
@@ -175,21 +180,21 @@ mybox ssh prod --local-port 2222 --ftp 35121 --kill-stale
 服务端的 FTP 跟着 `mybox serve` 常驻，客户端一条参数接上：
 
 ```bash
-mybox ssh prod --ftp 35121
+mybox connect prod --ftp 35121
 # FTP 客户端连 127.0.0.1:35121，用户名密码随便填
 ```
 
 `--ftp` 走的就是 `-f 2121:LOCAL`，额外带上被动模式改写（自动替换 `227`/`229` 里的地址端口，每条数据连接单独开流），FileZilla 直接可用。`--ftp` 可以和 `-f`、`--` 混用：
 
 ```bash
-mybox ssh prod --ftp 35121 -f 8080:9080
-mybox ssh prod --ftp 35121 -- -L 9090:localhost:80
+mybox connect prod --ftp 35121 -f 8080:9080
+mybox connect prod --ftp 35121 -- -L 9090:localhost:80
 ```
 
 服务端改了 `--ftp-port` 时，客户端用完整写法标注：
 
 ```bash
-mybox ssh prod -f ftp:3121:13121
+mybox connect prod -f ftp:3121:13121
 ```
 
 ### `mybox ls`
