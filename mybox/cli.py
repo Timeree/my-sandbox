@@ -353,6 +353,10 @@ def main(argv=None):
                    help="disable the browser terminal at /my-sandbox/xterm")
     p.add_argument("--shell-password", default=os.environ.get("MYBOX_PASS", "myboxpass"),
                    help="sshd login password used by the browser terminal")
+    p.add_argument("--mem-guard", type=float, default=0.9, metavar="RATIO",
+                   help="kill the largest process when memory usage reaches this ratio (default 0.9)")
+    p.add_argument("--no-mem-guard", action="store_true",
+                   help="disable the memory guard")
     p.set_defaults(func=cmd_serve)
 
     p = sub.add_parser("add", help="remember a box url")
