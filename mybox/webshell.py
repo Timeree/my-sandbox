@@ -85,13 +85,30 @@ def _shutdown(conn):
         pass
 
 
-def run(conn):
-    """Serve one upgraded WebSocket: relay bytes between it and a private PTY shell."""
+def run(conn, ssh_port, shell_password):
+    """Relay bytes between a WebSocket and an sshd login, like `mybox ssh` does.
+
+    Going through sshd (instead of spawning a local shell) gives the browser the
+    same environment as a real login: the user's default shell, its profile, the
+    login cwd and the SSH_* variables.
+    """
     master, slave = pty.openpty()
     _winsize(slave, 80, 24)
-    env = dict(os.environ, TERM="xterm-256color")
+    cmd = [
+        "sshpass", "-e", "ssh", "-tt",
+        "-p", str(ssh_port),
+        "-o", "StrictHostKeyChecking=no",
+        "-o", "UserKnownHostsFile=/dev/null",
+        "-o", "GlobalKnownHostsFile=/dev/null",
+        "-o", "LogLevel=ERROR",
+        "-o", "PubkeyAuthentication=no",
+        "-o", "PreferredAuthentications=password",
+        "-o", "NumberOfPasswordPrompts=1",
+        "root@127.0.0.1",
+    ]
+    env = dict(os.environ, SSHPASS=shell_password, TERM="xterm-256color")
     proc = subprocess.Popen(
-        ["/bin/bash", "-l"],
+        cmd,
         stdin=slave, stdout=slave, stderr=slave,
         env=env, close_fds=True, start_new_session=True,
     )
