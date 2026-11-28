@@ -342,6 +342,8 @@ def main(argv=None):
     p.add_argument("--port", type=int, default=int(os.environ.get("PORT", 3000)))
     p.add_argument("--ssh-port", type=int, default=int(os.environ.get("SSH_PORT", 22)))
     p.add_argument("--ftp-port", type=int, default=int(os.environ.get("FTP_PORT", 2121)))
+    p.add_argument("--no-web", action="store_true",
+                   help="disable the browser terminal at /my-sandbox/xterm")
     p.set_defaults(func=cmd_serve)
 
     p = sub.add_parser("add", help="remember a box url")
