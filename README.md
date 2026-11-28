@@ -38,8 +38,23 @@ mybox serve -p ABCD1234     # 指定密码
 | `--ftp-port` | `$FTP_PORT` 或 `2121` | 内置 FTP 端口，随 serve 一起常驻 |
 | `--no-web` | 关 | 关闭浏览器网页终端 `/my-sandbox/xterm` |
 | `--shell-password` | `$MYBOX_PASS` 或 `myboxpass` | 网页终端登录 sshd 用的密码 |
+| `--mem-guard` | `0.9` | 内存守护阈值；已用内存达此比例时每 6 秒检查、杀掉占用最多的进程 |
+| `--no-mem-guard` | 关 | 关闭内存守护（默认开启） |
 
 只接受 `/my-sandbox` 和 `/my-sandbox/xterm/ws` 两个路径的 WebSocket 升级，其余 404。
+
+### 内存守护
+
+`mybox serve` 默认在后台每 6 秒采一次内存：优先读 cgroup v2（`memory.current` 减去可回收的 `inactive_file`），没有 cgroup 时回退 `/proc/meminfo`。已用比例达到 `--mem-guard`（默认 `0.9`，即 90%）时，找出当前 `VmRSS` 最大的进程并 `SIGKILL`，日志打到 stderr：
+
+```
+mybox serve: mem guard on (threshold 90%, every 6s)
+mybox memguard: mem 93% >= 90%, killed pid 12345 (rss 2048 MiB) python3 /app/worker.py
+```
+
+- 不会杀自己（`serve` 进程及其父进程）和 PID 1。
+- 每轮只杀一个最大的进程，6 秒后若仍超阈值再杀下一个，逐步降压，不会一次性清空。
+- `--no-mem-guard` 关闭；`mybox serve --mem-guard 0.8` 改阈值。
 
 ### 浏览器网页终端
 
