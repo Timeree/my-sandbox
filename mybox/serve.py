@@ -501,9 +501,12 @@ def run(args):
     info = f"mybox serve: http {args.port}, ssh {args.ssh_port}, ftp {args.ftp_port}"
     if password:
         info += f", password {password}"
-    if server.web:
-        info += f", web {WEB_PATH}"
     print(info, flush=True)
+    if server.web:
+        print(f"mybox serve: web terminal enabled at http://localhost:{args.port}{WEB_PATH} "
+              "(disable with --no-web)", flush=True)
+    else:
+        print("mybox serve: web terminal disabled (--no-web)", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
