@@ -37,6 +37,7 @@ mybox serve -p ABCD1234     # 指定密码
 | `--ssh-port` | `$SSH_PORT` 或 `22` | SSH 端口，按需拉起 sshd |
 | `--ftp-port` | `$FTP_PORT` 或 `2121` | 内置 FTP 端口，随 serve 一起常驻 |
 | `--no-web` | 关 | 关闭浏览器网页终端 `/my-sandbox/xterm` |
+| `--shell-password` | `$MYBOX_PASS` 或 `myboxpass` | 网页终端登录 sshd 用的密码 |
 
 只接受 `/my-sandbox` 和 `/my-sandbox/xterm/ws` 两个路径的 WebSocket 升级，其余 404。
 
@@ -49,8 +50,8 @@ https://host/my-sandbox/xterm?token=XXX
 ```
 
 - 前端 xterm.js 走 CDN 加载，服务端只发一页 HTML，零新增依赖；打不开 CDN 的浏览器需自带网络。
-- 打开页面后自动连 `/my-sandbox/xterm/ws`，服务端为每条连接起一个独立的 PTY shell（本地 root，环境和 `mybox ssh` 一致），窗口尺寸随浏览器自适应。
-- 每条连接的 shell 独立，断开即终止；进程组一起清理，不残留。
+- 打开页面后自动连 `/my-sandbox/xterm/ws`，服务端用 sshpass 登录本地 sshd（`--shell-password`，默认 `myboxpass`），为每条连接开一个独立的登录会话。**环境和 `mybox ssh` 完全一致**：默认 shell（如 fish）、登录目录、`SSH_*` 变量都由 sshd 会话决定，不是 serve 进程自己的 shell 环境。
+- 每条连接的会话独立，断开即终止；sshpass 进程组和远端 sshd 会话一起清理，不残留。
 - 开了 `-p` 时页面和它的 WebSocket 都校验 `p`，把 `p=<密码>` 加进 URL 即可（`?token=XXX&p=ABCD1234`），无密码或密码错误返回 401。
 - 默认开启。`mybox serve --no-web` 关闭后，页面和 WebSocket 都返回 404。
 - 这是功能完整的 root shell，鉴权只靠入口 URL 和服务端 `-p`，**不要裸奔公网**。
