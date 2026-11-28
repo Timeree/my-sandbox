@@ -36,8 +36,24 @@ mybox serve -p ABCD1234     # 指定密码
 | `--port` | `$PORT` 或 `3000` | HTTP/WebSocket 监听端口 |
 | `--ssh-port` | `$SSH_PORT` 或 `22` | SSH 端口，按需拉起 sshd |
 | `--ftp-port` | `$FTP_PORT` 或 `2121` | 内置 FTP 端口，随 serve 一起常驻 |
+| `--no-web` | 关 | 关闭浏览器网页终端 `/my-sandbox/xterm` |
 
-只接受 `/my-sandbox` 一个路径的 WebSocket 升级，其余 404。
+只接受 `/my-sandbox` 和 `/my-sandbox/xterm/ws` 两个路径的 WebSocket 升级，其余 404。
+
+### 浏览器网页终端
+
+打开 `/my-sandbox/xterm` 就是个可直接用的 root shell，不必装客户端、不必 `mybox add`：
+
+```
+https://host/my-sandbox/xterm?token=XXX
+```
+
+- 前端 xterm.js 走 CDN 加载，服务端只发一页 HTML，零新增依赖；打不开 CDN 的浏览器需自带网络。
+- 打开页面后自动连 `/my-sandbox/xterm/ws`，服务端为每条连接起一个独立的 PTY shell（本地 root，环境和 `mybox ssh` 一致），窗口尺寸随浏览器自适应。
+- 每条连接的 shell 独立，断开即终止；进程组一起清理，不残留。
+- 开了 `-p` 时页面和它的 WebSocket 都校验 `p`，把 `p=<密码>` 加进 URL 即可（`?token=XXX&p=ABCD1234`），无密码或密码错误返回 401。
+- 默认开启。`mybox serve --no-web` 关闭后，页面和 WebSocket 都返回 404。
+- 这是功能完整的 root shell，鉴权只靠入口 URL 和服务端 `-p`，**不要裸奔公网**。
 
 ### 握手密码 `-p`
 
