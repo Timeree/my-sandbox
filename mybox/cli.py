@@ -23,6 +23,10 @@ def parse_forwards(items):
             ftp = None
             if part.startswith("ftp:"):
                 part, ftp = part[4:], True
+            if part.isdigit():
+                port = int(part)
+                out.append((port, port, ftp))
+                continue
             remote, sep, local = part.partition(":")
             if not sep or not remote.isdigit() or not local.isdigit():
                 raise ValueError(f"invalid forward: {part}")
@@ -248,6 +252,8 @@ def cmd_ssh(args):
         forwards = parse_forwards(args.forward)
     except ValueError as exc:
         sys.exit(str(exc))
+    if args.ssh is not None:
+        forwards.append((args.remote_port, args.ssh, False))
     if args.ftp is not None:
         forwards.append((2121, args.ftp, True))
 
@@ -288,7 +294,8 @@ def cmd_ssh(args):
         box.close()
         sys.exit(f"cannot listen: {exc}")
     log(f"listening: ssh 127.0.0.1:{ssh_port}" +
-        ("".join(f", ftp {local}" for _, local, ftp in forwards if ftp) or ""))
+        ("".join(f", ftp {local}" for _, local, ftp in forwards if ftp) or "") +
+        (f", ssh {args.ssh}" if args.ssh is not None else ""))
 
     ok, detail = probe_ssh(ssh_port)
     if not ok:
@@ -353,19 +360,21 @@ def main(argv=None):
     p.set_defaults(func=cmd_add)
 
     p = sub.add_parser(
-        "ssh", help="open a shell on a box",
+        "connect", aliases=["ssh"], help="open a shell on a box",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "arguments after -- go to ssh verbatim:\n"
-            "  mybox ssh -- ls -l /var/log\n"
-            "  mybox ssh box1 -- -t 'cd /app && ls; exec bash'\n"
-            "  mybox ssh box1 -- -L 9090:localhost:80 -N\n"
-            "  mybox ssh box1 -- -f -L 9090:localhost:80   (ssh's own -f)\n"
+            "  mybox connect -- ls -l /var/log\n"
+            "  mybox connect box1 -- -t 'cd /app && ls; exec bash'\n"
+            "  mybox connect box1 -- -L 9090:localhost:80 -N\n"
+            "  mybox connect box1 -- -f -L 9090:localhost:80   (ssh's own -f)\n"
         ),
     )
     p.add_argument("name", nargs="?", help="box name, defaults to the first one")
-    p.add_argument("-f", "--forward", action="append", default=[], metavar="REMOTE:LOCAL",
-                   help="also forward remote port to local port, repeatable")
+    p.add_argument("-f", "--forward", action="append", default=[], metavar="[REMOTE:]LOCAL",
+                   help="forward a port: PORT means PORT:PORT, or REMOTE:LOCAL; repeatable")
+    p.add_argument("--ssh", type=int, metavar="LOCAL_PORT",
+                   help="map the box's ssh service to this local port")
     p.add_argument("--ftp", type=int, metavar="LOCAL_PORT",
                    help="map the box's ftp (2121) to this local port")
     p.add_argument("--remote-port", type=int, default=22, help="sshd port on the box")
