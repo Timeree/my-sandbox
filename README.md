@@ -48,7 +48,7 @@ mybox serve -p ABCD1234     # 指定密码
 `mybox serve` 默认在后台每 6 秒采一次内存：优先读 cgroup v2（`memory.current` 减去可回收的 `inactive_file`），没有 cgroup 时回退 `/proc/meminfo`。已用比例达到 `--mem-guard`（默认 `0.9`，即 90%）时，找出当前 `VmRSS` 最大的进程并 `SIGKILL`，日志打到 stderr：
 
 ```
-mybox serve: mem guard on (threshold 90%, every 6s)
+mybox serve: mem guard on: when memory >= 90%, kill the largest process, checked every 6s (disable with --no-mem-guard)
 mybox memguard: mem 93% >= 90%, killed pid 12345 (rss 2048 MiB) python3 /app/worker.py
 ```
 
