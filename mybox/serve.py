@@ -11,7 +11,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode, urlparse
 
-from . import ftpd, webshell, wsproto
+from . import ftpd, memguard, webshell, wsproto
 
 SSHD_CONFIG = "/tmp/mybox-sshd_config"
 PATHS = {"/my-sandbox"}
@@ -502,6 +502,11 @@ def run(args):
     if password:
         info += f", password {password}"
     print(info, flush=True)
+    limit = 0 if args.no_mem_guard else args.mem_guard
+    if limit > 0:
+        threading.Thread(target=memguard.run, args=(limit,), daemon=True).start()
+        print(f"mybox serve: mem guard on (threshold {limit:.0%}, every {memguard.INTERVAL}s)",
+              flush=True)
     if server.web:
         print(f"mybox serve: web terminal enabled at http://localhost:{args.port}{WEB_PATH} "
               "(disable with --no-web)", flush=True)
